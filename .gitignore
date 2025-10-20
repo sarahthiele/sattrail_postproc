@@ -1,3 +1,16 @@
+*.txt
+*.ast
+*-sattrail.hdf
+*.fits
+*.fits.fz
+*.png
+*.jpeg
+*.jpg
+*.pdf
+
+# =======================================================================
+# From .gitignore Template:
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
