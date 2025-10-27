@@ -17,7 +17,7 @@ then you can use the dateframe `df0` to fiddle with the collect_segments() and f
 skeleton = <True/False>
 progressive = <True/False>
 
-subfile = '{}{}-sub.fits'.format(datapath, subroot)
+subfile = '{}{}-sub.fits.fz'.format(datapath, subroot)
 detectionfile = '{}{}-detection.json'.format(detpath, subroot)
 
 sub0 = read_fits_file(subfile)
