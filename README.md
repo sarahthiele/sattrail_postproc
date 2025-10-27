@@ -11,7 +11,7 @@ detpath = '/data/USERS/sthiele/DETSAT/1-20250601/ihu63/'
 df0, trails, newmask, cpoints, rpoints = postproc(datapath, subroot, detpath, skeleton=False, SAVE=True, PLOT=False, progressive=True, gpu=False)
 ```
 
-which you can use the dateframe df0 to fiddle with the collect_segments() and find_bounds functions, or here is a sample from the first bit of postproc() you could run on its own, I'm still working out the skeletonize thing because it messes up the width and bounds calculation, but it does help make the phl much cleaner:
+then you can use the dateframe `df0` to fiddle with the collect_segments() and find_bounds() functions, or here is a sample from the first bit of new_postproc.postproc() you could run on its own, I'm still working out the skeletonize thing because it messes up the width and bounds calculation, but it does help make the phl much cleaner:
 
 ```
 skeleton = <True/False>
