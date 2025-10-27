@@ -857,8 +857,8 @@ def progressive_hough_transform(edges, min_line_length=10, min_threshold=10, ini
 
 def postproc(subpath, subroot, detpath, outputpath, SAVE=False, PLOT=False, skeleton=False, progressive=True, gpu=False, 
              filter_radius=10, nclose=10, nhalf=1, nsig=3, gap=2):
-    subfile = '{}{}-sub.fits'.format(subpath, subroot)
-    detectionfile = '{}detection_{}.json'.format(detpath, subroot)
+    subfile = '{}{}-sub.fits.fz'.format(subpath, subroot)
+    detectionfile = '{}{}-detection.json'.format(detpath, subroot)
     outputfile = '{}{}-sattrail.hdf'.format(outputpath, subroot)
     
     sub0 = read_fits_file(subfile)
