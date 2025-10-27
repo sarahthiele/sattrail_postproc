@@ -1,7 +1,7 @@
 # sattrail_postproc
 Postprocessing for sattrails detections
 
-# How to use (Oct 2025 update):
+## Oct 26 2025 update:
 Working on new_postproc.py, which has option to use a skeletonized mask for the probabilistic hough lines (phl) instead of the entire detection mask. This might lead to more fine-tuned slope detection, but for lines that are almost horizontal (like GEO sats) it might create a false slope by thinning the line wonkily. In this case scikit-learn's thin function seems work better, but it's a lot slower than skeletonize, so this might be futile. TBD.
 
 new_postproc.py also has a cpu-enabled median filter subtraction that is much faster (~100x) than the old cpu one, and also faster than the current gpu implementation (although the cpu one only does the rolling median in bubbles centered on the mask lines to minimize computation time, so this could be done for the gpu one also. But it looks like postprocessing will have to be done on a cpu since our current computing cluster has long wait times so we need to optimize resource management. 
