@@ -49,6 +49,16 @@ def gauss_with_linear(x, a, x0, sigma, b, c):
     return a * np.exp(-(x - x0)**2 / (2 * sigma**2)) + b * x + c
 
 def get_line_data(lines, PLOT=True):
+    '''
+    Make a pandas DataFrame of all of the lines that result from 
+    applying the Hough transform to the NN detection. Rejects any
+    lines that have slopes with 0.5 degrees of 90, which should 
+    discard any star lines that have accidentally been detected.
+
+    Inputs:
+    lines --- output from probabilistic Hough transform)
+    PLOT  --- [boolean], whether to plot Hough lines 
+    '''
     c1s=np.array([])
     c2s=np.array([])
     r1s=np.array([])
@@ -151,6 +161,7 @@ def collect_segments(sub, line_data, PLOT=False):
 
                 if PLOT:
                     fig, ax = plt.subplots(1,3, figsize=(12,3)) 
+                    min_value, max_value = zscale.get_limits(sub)
                     ax[0].imshow(sub, vmin=min_value, vmax=max_value, cmap='Greys_r')
                     ax[0].plot([c1_i,c2_i],[r1_i,r2_i])
                     ax[0].plot([c1_j,c2_j],[r1_j,r2_j])
@@ -299,7 +310,7 @@ def perpendicular_line_profile(image, start_point, end_point, perp_range, num_pe
     
     return perp_distances, np.array(amplitudes)
 
-def total_line_coords(df, LINENUM, PLOT=False):
+def total_line_coords(df, sub, LINENUM, PLOT=False):
     RR = []
     CC = []
 
@@ -656,18 +667,18 @@ def fit_tophat(sub, CC, RR, dat, LENGTH, rollmean, PLOT=False):
     return lbound, rbound
 
 def find_edgetrails(sub, dat, EDGE_THRESHOLD=5):
-
     Csplit = np.where(np.diff(np.where(np.sum(sub,axis=0)==0))[0]>1)[0]
     Cmin = np.where(np.sum(sub,axis=0)==0)[0][Csplit][0]
-    Cmax = np.where(np.sum(sub,axis=0)==0)[0][Csplit+1][0]
+    Cmax = np.where(np.sum(sub,axis=0)==0)[0][Csplit+1][-1]
     Rsplit = np.where(np.diff(np.where(np.sum(sub,axis=1)==0))[0]>1)[0]
     Rmin = np.where(np.sum(sub,axis=1)==0)[0][Rsplit][0]
-    Rmax = np.where(np.sum(sub,axis=1)==0)[0][Rsplit+1][0]
+    Rmax = np.where(np.sum(sub,axis=1)==0)[0][Rsplit+1][-1]
+    print('Cmin: {},  Cmax: {}, Rmin: {}, Rmax: {}'.format(Cmin,Cmax,Rmin,Rmax))
 
-    T = (np.abs(Rmax-dat.r1)<=EDGE_THRESHOLD)|(np.abs(Rmax-dat.r2)<=EDGE_THRESHOLD)
-    B = (np.abs(Rmin-dat.r1)<=EDGE_THRESHOLD)|(np.abs(Rmin-dat.r2)<=EDGE_THRESHOLD)
-    R = np.abs(Cmax-dat.c2) <= EDGE_THRESHOLD
-    L = np.abs(Cmin-dat.c1) <= EDGE_THRESHOLD
+    T = (dat.r2>=Rmax-EDGE_THRESHOLD)|(dat.r1>=Rmax-EDGE_THRESHOLD)
+    B = (dat.r2<=Rmin+EDGE_THRESHOLD)|(dat.r1<=Rmin+EDGE_THRESHOLD)
+    R = (dat.c2>=Cmax-EDGE_THRESHOLD)
+    L = (dat.c1<=Cmin+EDGE_THRESHOLD)
 
     dat = dat.drop(columns=['linenum'])
     IOL = np.zeros(len(dat)).astype(int)
@@ -744,7 +755,7 @@ def postproc(subrootfile, detectionfile):
     while i < maxi:
         LINENUM = np.unique(df.linenum.values.astype(int))[i]
         print(LINENUM)
-        RR, CC, LENGTH = total_line_coords(df, LINENUM=LINENUM, PLOT=False)
+        RR, CC, LENGTH = total_line_coords(df, sub, LINENUM=LINENUM, PLOT=False)
         print('Length: ', LENGTH)
         #plot_amplitude(RR, CC, sub);
         rr, cc, R0, C0, coefficients = fit_coords(RR, CC, LENGTH, sub, PLOT=False)
@@ -765,7 +776,7 @@ def postproc(subrootfile, detectionfile):
             mask_fit, mask_new, rr_new, cc_new, halfwidth = fit_width(dat, LBOUNDS[0], RBOUNDS[0], rr, cc, R0, 
                                                                       C0, sub, NSIG, NHALF, NCLOSE, PLOT=False)
         elif NEWLENGTH < 200:
-            RR, CC, LENGTH = total_line_coords(df, LINENUM=LINENUM, PLOT=False)
+            RR, CC, LENGTH = total_line_coords(df, sub, LINENUM=LINENUM, PLOT=False)
             rr_end = RR # rr[(dat.dx.values>=0)&(dat.dx.values<=NEWLENGTH)]
             cc_end = CC # cc[(dat.dx.values>=0)&(dat.dx.values<=NEWLENGTH)]
             #plt.figure()
@@ -797,80 +808,3 @@ def postproc(subrootfile, detectionfile):
     FINALLIST = find_edgetrails(sub, FINALLIST, EDGE_THRESHOLD=5)
     
     return FINALLIST, CPOINTS, RPOINTS
-
-def find_TLE_file(subfile):
-    hdr = fits.getheader(subfile)
-    date = hdr['DATE-OBS'].split('-')
-    year = int(date[0])
-    month = int(date[1])
-    day = int(date[2])
-
-    if year<2025:
-        TLEROOT = 'satchecker_TLE_files'
-    if (year==2025)&(
-    2025-03-30
-    TLEFILE = '/data/CAT/TLE/ALL_TLE/{}-{:2d}-{:2d}/ALL_TLE.txt'.format(year,month,day)
-
-    return TLEFILE
-    
-
-def find_satellites(subfile, subfileroot, FINALLIST, CPOINTS, RPOINTS):
-    ntimes = 10
-    #lnum = 8
-    npoints = len(CPOINTS[0])
-    print('number of points: ', npoints)
-    
-    names = []
-    offsets = []
-    pixelid = []
-    times = []
-    periods = []
-    incs = []
-    eccs = []
-    
-    for lnum in range(len(CPOINTS)):
-        RA, DEC = get_coords(subfile, np.array(CPOINTS[lnum]), np.array(RPOINTS[lnum]))
-        RA_s, DEC_s, ra_h, ra_m, ra_s, dec_d, dec_m, dec_s, exptime, year, month, day_tot = astfile_info(RA, DEC, file, reverse=False, 
-                                                                                            sort=False, inframe=False, log=False)
-        repeat = np.repeat([RA, DEC, ra_h, ra_m, ra_s, dec_d, dec_m, dec_s, day_tot],ntimes,axis=1)
-        repeat[-1] += np.concatenate(np.repeat(np.linspace(0,exptime,ntimes)[np.newaxis, :],npoints,axis=0))/(24*3600)
-        RA, DEC, ra_h, ra_m, ra_s, dec_d, dec_m, dec_s, day_tot = repeat
-        lineids = np.arange(0,len(ra_h),1)
-        trueids = np.repeat(np.arange(0,npoints,1),ntimes,axis=0)
-        write_astrometry_file(subfileroot, lineids, ra_h.astype(int), ra_m.astype(int), ra_s, dec_d.astype(int), dec_m.astype(int), dec_s, 
-                              year, month, day_tot)
-        #!sat_id test.ast -t '/data/CAT/TLE/satchecker_TLE_files/2024-11-15/ALL_TLE.txt' -r 0.5 -m 20 -v > MEGATESTER.txt
-    
-    
-        import subprocess
-        
-        result = subprocess.run([
-            'sat_id', 'test.ast',
-            '-t', '/data/CAT/TLE/satchecker_TLE_files/2024-11-15/ALL_TLE.txt',
-            '-r', '0.5',
-            '-m', '20',
-            '-v'
-        ], capture_output=True, text=True, check=True)
-    
-        results = result.stdout.split('\n')
-        check = False
-        for i in range(len(results)):
-            L=results[i]
-            if L[:6] == '     L':
-                times.append(float(L[23:31]))
-                pixelid.append(int(L[6:12]))
-                check = True
-                continue
-            if check == True:
-                name = L[52:].split(':')[1].lstrip().strip('\n')
-                names.append(name)
-                periods.append(float(L.split('P=')[1].split('min')[0]))
-                incs.append(float(L.split('i=')[1].split(':')[0]))
-                eccs.append(float(L.split('e=')[1].split(';')[0]))
-                check = False
-            if 'offset' in L:
-                offsets.append(float(L[-11:-5]))
-    
-    periods = np.array(periods)
-    avals = (6.67*1e-11*5.972*1e24/(4*np.pi**2)*(periods*60)**2)**(1/3)
-    alts = (avals - 6371*1000)/1000
