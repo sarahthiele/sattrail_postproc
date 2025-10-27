@@ -20,10 +20,10 @@ import time
 import numba as nb
 import cv2
 
-#import sys
-#sys.path.append('../identify_sats')
-#from generate_astrometry import *
-#ihu_table = pd.read_hdf('../identify_sats/IHU_TABLE.hdf')
+import sys
+sys.path.append('../identify_sats')
+from generate_astrometry import *
+ihu_table = pd.read_hdf('../identify_sats/IHU_TABLE.hdf')
 
 zscale = ZScaleInterval()
 
