@@ -62,7 +62,14 @@ new_postproc.py also has a cpu-enabled median filter subtraction that is much fa
 
 Right now the new_postproc script takes about 10s to run, which needs to be cut down further, since we still need to add on the satellite identification part using sat_id.
 
-Two functions that are both slow and don't work fantastically within new_postproc are __collect_segments()__ and __find_bounds()__. The former takes all of the lines identified by the phl and determines which segments belong to the same line. This has the problem where you need to dictate that disjoint segments might be part of the same line, which also might have some curvature, but they might also just be a bunch of short trails (like for geo sats) in a row. In the second case we then use find_gaps() and find_bounds() to determine where the gaps are and if there is significant brightness between them that they're likely part of the same trail. find_bounds() needs work because it is difficult to make an algorithm that works universally. 
+Two functions that are both slow and don't work fantastically within new_postproc are __collect_segments()__ and __find_bounds()__. The former takes all of the lines identified by the phl and determines which segments belong to the same line. This has the problem where you need to dictate that disjoint segments (e.g. from faint trails) might be part of the same line, which also might have some curvature, but they might also just be a bunch of short trails (like for geo sats) in a row. In the second case we then use find_gaps() and find_bounds() to determine where the gaps are and if there is significant brightness between them that they're likely part of the same trail. find_bounds() needs work because it is difficult to make an algorithm that works universally. 
+
+Here are two examples of subtracted image with the NN-detected mask overlaid and the probabilistic hough line, collected into their individual lines by collect_segments(). The first case has a faint trail where sections of it are detected. The second has a chain of GEO sats:
+
+<img src="example_1.png" alt="drawing" width="600"/>
+<img src="detection_1.png" alt="drawing" width="600"/>
+<img src="example_2.png" alt="drawing" width="600"/>
+<img src="detection_2.png" alt="drawing" width="600"/>
 
 Sidenote: I modified my local version of sattrails such that it works on .fz files so no need to funpack everything now woohoo
 
