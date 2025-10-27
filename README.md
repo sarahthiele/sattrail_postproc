@@ -49,10 +49,15 @@ __Changes needed:__
 1. sometimes line 494 in new_postproc.py (imax = imaxs[(imaxs>=allgaps[i])&(imaxs<=allgaps[i+1])][0] in the find_bounds() function) throws an error and then I rerun the script and its fine and I can't figure out why. In general speed up find_bounds() and make sure it doesn't give bounds that are smaller than the original mask bounds. Also I just don't love how this function works in general and would love for it to be doing things in a smarter way
 2. speed up collect_segments() and make it more elegant
 3. modify the find_width calculation that could work if the mask has been skeletonized (basically change the binary inflation and fitting)
+
 __To add:__
-in identify_sats:
+for identifying sats and photometry:
+
 1. Function to append all the output files together that hypothetically share lines that go off their edges. Right now the postproc() function results have in/out ("IO") columns that have a "1" if they have lines going off that side. IOframe=1 if lines go off any edges, and then IOL means a line goes off the left side, IOR off the right, IOT for top, IOB for bottom. I have the ihu table in identify_sats directory that allows you to find which ihus are adjacent ([0] means no adjacent ihu), so you should be able to just read that in and append the output files, then find lines that are within some tolerance distance from each other.
 2. Better managing the sat_id output and what to do once I have that information
+
+-----
+
 
 Working on new_postproc.py, which has option to use a skeletonized mask for the probabilistic hough lines (phl) instead of the entire detection mask. This might lead to more fine-tuned slope detection, but for lines that are almost horizontal (like GEO sats) it might create a false slope by thinning the line wonkily. In this case scikit-learn's thin function seems work better, but it's a lot slower than skeletonize, so this might be futile. TBD.
 
