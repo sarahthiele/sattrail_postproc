@@ -4,14 +4,14 @@ Postprocessing for sattrails detections
 ## Example usage:
 
 ```
-from new_postproc import *
+from postproc import *
 subroot = '1-557199_63'
 datapath = '/nfs/php2/ar3/P/HP1/REDUCTION/SUB/1-20250601/ihu63/'
 detpath = '/data/USERS/sthiele/DETSAT/1-20250601/ihu63/'
 df0, trails, newmask, cpoints, rpoints = postproc(datapath, subroot, detpath, skeleton=False, SAVE=True, PLOT=False, progressive=True, gpu=False)
 ```
 
-then you can use the dateframe `df0` to fiddle with the collect_segments() and find_bounds() functions, or here is a sample from the first bit of new_postproc.postproc() you could run on its own, I'm still working out the skeletonize thing because it messes up the width and bounds calculation, but it does help make the phl much cleaner:
+then you can use the dateframe `df0` to fiddle with the collect_segments() and find_bounds() functions, or here is a sample from the first bit of postproc.postproc() you could run on its own, I'm still working out the skeletonize thing because it messes up the width and bounds calculation, but it does help make the phl much cleaner:
 
 ```
 skeleton = <True/False>
@@ -44,7 +44,11 @@ dindex, numlines = collect_segments(sub0, df0, PLOT=True)
 df0['linenum'] = dindex
 ```
 
-## Oct 26 2025 update:
+## Oct 31 2025 updates:
+1. renamed new_postproc.py to just postproc.py
+2. 
+
+## Oct 26 2025 updates:
 __Changes needed (see further notes below):__
 1. sometimes line 494 in new_postproc.py (imax = imaxs[(imaxs>=allgaps[i])&(imaxs<=allgaps[i+1])][0] in the find_bounds() function) throws an error and then I rerun the script and its fine and I can't figure out why. In general speed up find_bounds() and make sure it doesn't give bounds that are smaller than the original mask bounds. Also I just don't love how this function works in general and would love for it to be doing things in a smarter way
 2. speed up collect_segments() and make it more elegant
