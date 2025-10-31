@@ -855,30 +855,19 @@ def progressive_hough_transform(edges, min_line_length=10, min_threshold=10, ini
     return all_lines
 
 
-def postproc(subpath, subroot, detpath, outputpath, SAVE=False, PLOT=False, skeleton=False, progressive=True, gpu=False, 
-             filter_radius=10, nclose=10, nhalf=1, nsig=3, gap=2):
-    
-    outputfile = '{}{}-sattrail.hdf'.format(outputpath, subroot)
-    try:
-        subfile = '{}{}-sub.fits.fz'.format(subpath, subroot)
-        sub0 = read_fits_file(subfile)
-    except:
-        subfile = '{}{}-sub.fits'.format(subpath, subroot)
-        sub0 = read_fits_file(subfile)
-    try:
-        detectionfile = '{}{}-detection.json'.format(detpath, subroot)
-        with open(detectionfile, 'r') as f:
-            data = json.load(f)
-    except:
-        detectionfile = '{}detection_{}.json'.format(detpath, subroot)
-        with open(detectionfile, 'r') as f:
-            data = json.load(f)
+def postproc(subfile, detfile, outputfile, plotroot, SAVE=True, PLOT=False,
+             skeleton=False, progressive=True, gpu=False, filter_radius=10,
+             nclose=10, nhalf=1, nsig=3, gap=2):
+
+    sub0 = read_fits_file(subfile)
+    with open(detfile, 'r') as f:
+        data = json.load(f)
     pixels = np.array(data['mask'])
 
     if len(pixels)==0:
         dat = pd.DataFrame([0],columns=['numlines'])
         dat.to_hdf(outputfile,key='numlines')
-        
+
     mask = np.zeros((2048,2048))
     mask[pixels[:,1],pixels[:,0]] += 1
 
@@ -892,7 +881,7 @@ def postproc(subpath, subroot, detpath, outputpath, SAVE=False, PLOT=False, skel
                                     initial_threshold=200, initial_gap=50)
     else:
         lines = phl(maskphl, threshold=10, line_length=10, line_gap=50)
-        
+
     df0, slopes, bs = get_line_data(lines, PLOT=True)
 
     dindex, numlines = collect_segments(sub0, df0, PLOT=True)
@@ -917,24 +906,24 @@ def postproc(subpath, subroot, detpath, outputpath, SAVE=False, PLOT=False, skel
     while i < maxi:
         linenum = np.unique(df.linenum.values.astype(int))[i]
         #print(linenum)
-        
+
         RR, CC, length = total_line_coords(df, linenum=linenum, PLOT=PLOT)
         #print('Length: ', length)
         #plot_amplitude(RR, CC, sub);
-        
+
         rr, cc, R0, C0, coefficients = fit_coords(RR, CC, length, sub, PLOT=PLOT)
         gaps, ngaps = find_gaps(rr, cc, RR, CC, R0, C0, sub, gap=gap, w=50)
         dat, rollmean, rollstd = rolling_mean(rr, cc, R0, C0, sub)
-    
-        df, lbounds, rbounds, newlength = find_bounds(rr, cc, RR, CC, R0, C0, df, 
-                                                  linenum, length, dat, rollmean, rollstd, 
+
+        df, lbounds, rbounds, newlength = find_bounds(rr, cc, RR, CC, R0, C0, df,
+                                                  linenum, length, dat, rollmean, rollstd,
                                                   gaps, ngaps, sub, nsig=4, PLOT=PLOT)
-    
+
         if newlength > 200:
             rr_end = rr[(dat.dx.values>lbounds[0])&(dat.dx.values<rbounds[0])]
             cc_end = cc[(dat.dx.values>lbounds[0])&(dat.dx.values<rbounds[0])]
 
-            mask_fit, mask_new, rr_new, cc_new, halfwidth = fit_width(dat, lbounds[0], rbounds[0], rr, cc, R0, 
+            mask_fit, mask_new, rr_new, cc_new, halfwidth = fit_width(dat, lbounds[0], rbounds[0], rr, cc, R0,
                                                                       C0, sub, nsig, nhalf, nclose, PLOT=PLOT)
         elif newlength < 200:
             RR, CC, length = total_line_coords(df, linenum=linenum, PLOT=PLOT)
@@ -946,7 +935,7 @@ def postproc(subpath, subroot, detpath, outputpath, SAVE=False, PLOT=False, skel
             mask_new = morphology.binary_closing(mask_new, morphology.disk(nclose))
 
         mask_master += mask_new
-        
+
         data = {'linenum':linenum,'length':newlength, 'c1':cc_end.min(),'c2':cc_end.max(),'r1':rr_end[np.argmin(cc_end)],
                 'r2':rr_end[np.argmax(cc_end)],'cpix':[cc_end],'rpix':[rr_end]}
         newlist = pd.DataFrame(data)
@@ -957,7 +946,7 @@ def postproc(subpath, subroot, detpath, outputpath, SAVE=False, PLOT=False, skel
         mids = np.argmin(np.abs(dat.dx.values-lpoints.reshape(1,len(lpoints)).T),axis=1)
         cpoints.append(cc[mids])
         rpoints.append(rr[mids])
-        
+
         i += 1
         maxi = len(np.unique(df.linenum.values))
         #print('\n')
@@ -966,5 +955,5 @@ def postproc(subpath, subroot, detpath, outputpath, SAVE=False, PLOT=False, skel
 
     if SAVE:
         FINALLIST.to_hdf(outputfile, key='data')
-    
+
     return df0, FINALLIST, mask_master, cpoints, rpoints
