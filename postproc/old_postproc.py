@@ -14,11 +14,11 @@ from sklearn.mixture import GaussianMixture
 from sklearn.cluster import SpectralClustering
 from scipy.ndimage import map_coordinates
 from scipy.ndimage import median_filter
-from skimage.morphology import skeletonize, thin, medial_axis
 import subprocess
-import time
-import numba as nb
-import cv2
+#import torch
+#print(f"CUDA available: {torch.cuda.is_available()}")
+#import time
+#import kornia
 
 import sys
 sys.path.append('../identify_sats')
@@ -90,7 +90,7 @@ def get_line_data(lines, PLOT=True):
 
     return df, slopes, bs
 
-def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
+def collect_segments(sub, line_data, PLOT=False):
     dfc = line_data.copy()
 
     # create line index array
@@ -133,7 +133,7 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
 
             # if line j deviates from the line of interest by more than X pixels 
             # we assume they're not part of the same line
-            if (dev_ij.max() < 10):
+            if (dev_ij.max() < 20):#&(np.abs(b_j-b_i)<50):
 
                 # combine points into one line
                 c_all = np.append(cc_i,cc_j)
@@ -155,12 +155,13 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
                 dev = np.abs(m * cfit - rfit_parabola + b) / np.sqrt(m**2 + 1)
                 devmax = max(dev)
                 
-                #L = np.sum(np.sqrt(np.diff(np.sort(c_all))**2 + np.diff(r_all[np.argsort(c_all)])**2))
-                L = np.sqrt((cmax-cmin)**2 + (r_cmax-r_cmin)**2)
+                L = np.sum(np.sqrt(np.diff(np.sort(c_all))**2 + np.diff(r_all[np.argsort(c_all)])**2))
+                #L = np.sqrt((cmax-cmin)**2 + (r_all
                 dev_allowed = min(max(L**2/(8*1e5),2),10)
 
-                if PLOT_individual:
+                if PLOT:
                     fig, ax = plt.subplots(1,3, figsize=(12,3)) 
+                    min_value, max_value = zscale.get_limits(sub)
                     ax[0].imshow(sub, vmin=min_value, vmax=max_value, cmap='Greys_r')
                     ax[0].plot([c1_i,c2_i],[r1_i,r2_i])
                     ax[0].plot([c1_j,c2_j],[r1_j,r2_j])
@@ -176,21 +177,20 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
                     ax[2].axhline(dev_allowed,ls='--',color='xkcd:grey',alpha=0.7)
                     ax[2].set_title(devmax)
                 if devmax < dev_allowed:
-                    #print('test append')
-                    if PLOT_individual:
+                    if PLOT:
                         ax[0].set_title('same line: dev_ij = {}'.format((dev_ij.max())))
                     dindex[i,j] = j
                     dindex[j,i] = j
-                    cc_i = c_all
-                    rr_i = r_all
-                    c1_i = int(c_all.min())
-                    c2_i = int(c_all.max())
-                    r1_i = int(r_all[np.argmin(c_all)])
-                    r2_i = int(r_all[np.argmax(c_all)])
-                    s_i = (r2_i-r1_i)/(c2_i-c1_i)
-                    b_i = r2_i - s_i*c2_i
+                    #cc_i = c_all
+                    #rr_i = r_all
+                    #c1_i = int(c_all.min())
+                    #c2_i = int(c_all.max())
+                    #r1_i = int(r_all[np.argmin(c_all)])
+                    #r2_i = int(r_all[np.argmax(c_all)])
+                    #s_i = (r2_i-r1_i)/(c2_i-c1_i)
+                    #b_i = r2_i - s_i*c2_i
                 else:
-                    if PLOT_individual:
+                    if PLOT:
                         ax[0].set_title('different line: dev_ij = {:.4}'.format((dev_ij.max())))
                     
         didx += 1
@@ -225,7 +225,7 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
     NUMLINES = len(np.unique(dindex))
 
     if PLOT:
-        fig, ax = plt.subplots(1,2,figsize=(8,4))
+        fig, ax = plt.subplots(1,2)
         for i in range(1,NUMLINES+2):
             ax[0].scatter(line_data.slope.values[dindex==i],line_data.b.values[dindex==i],s=2,color=plt.colormaps['tab20'](i))
             for l in range(len(line_data.c1.values[dindex==i])):
@@ -310,11 +310,11 @@ def perpendicular_line_profile(image, start_point, end_point, perp_range, num_pe
     
     return perp_distances, np.array(amplitudes)
 
-def total_line_coords(df, linenum, PLOT=False):
+def total_line_coords(df, sub, LINENUM, PLOT=False):
     RR = []
     CC = []
 
-    for i in [linenum]:
+    for i in [LINENUM]:
         dfline = df.loc[df.linenum==i]
 
         for j in range(len(dfline)):
@@ -403,8 +403,8 @@ def plot_amplitude(RR, CC, sub):
     
     return
 
-def fit_coords(RR, CC, length, sub, PLOT=False):
-    if length > 200:
+def fit_coords(RR, CC, LENGTH, sub, PLOT=False):
+    if LENGTH > 200:
         coefficients = np.polyfit(CC, RR, 2)
     else:
         coefficients = np.polyfit(CC, RR, 1)
@@ -417,7 +417,7 @@ def fit_coords(RR, CC, length, sub, PLOT=False):
     rr = y_fit[(y_fit>=0)&(y_fit<2048)]
     C0 = cc.min()
     R0 = rr[np.argmin(cc)]
-    #print('C0: {}, R0: {}'.format(C0,R0))
+    print('C0: {}, R0: {}'.format(C0,R0))
 
     x_fit = np.arange(0,2048,1).astype(int)
     y_fit = np.round(parabola_function(x_fit),0).astype(int)
@@ -448,59 +448,56 @@ def rolling_mean(rr, cc, R0, C0, sub, w=50):
     return dat, rollmean, rollstd
     
 
-def find_gaps(rr, cc, RR, CC, R0, C0, sub, gap=2, w=50):
+def find_gaps(rr, cc, RR, CC, R0, C0, sub, GAP=2, w=50):
 
-    datgap = pd.DataFrame(np.array([CC,RR,np.sqrt((CC-C0)**2+(RR-R0)**2),sub[RR,CC]]).T, 
+    datGAP = pd.DataFrame(np.array([CC,RR,np.sqrt((CC-C0)**2+(RR-R0)**2),sub[RR,CC]]).T, 
                           columns=['c','r','dx','h']).sort_values('dx').reset_index(drop=True)
-    datgap['sep'] = np.append(0,datgap.dx.values[1:]-datgap.dx.values[:-1])
+    datGAP['sep'] = np.append(0,datGAP.dx.values[1:]-datGAP.dx.values[:-1])
     
-    gapsi = np.sort(np.append(datgap.loc[datgap.sep>gap].index.values-1, 
-                              datgap.loc[datgap.sep>gap].index.values))
-    ngaps = len(datgap.loc[datgap.sep>gap])
-    #print('NGAPS: ', ngaps)
+    GAPSI = np.sort(np.append(datGAP.loc[datGAP.sep>GAP].index.values-1, 
+                              datGAP.loc[datGAP.sep>GAP].index.values))
+    NGAPS = len(datGAP.loc[datGAP.sep>GAP])
+    print('NGAPS: ', NGAPS)
     
-    gaps = np.array([])
-    for i in range(len(gapsi)):
-        gaps = np.append(gaps, np.argmin(np.abs(cc-datgap.loc[gapsi].c.values[i])))
+    GAPS = np.array([])
+    for i in range(len(GAPSI)):
+        GAPS = np.append(GAPS, np.argmin(np.abs(cc-datGAP.loc[GAPSI].c.values[i])))
 
-    return gaps.astype(int), ngaps
+    return GAPS.astype(int), NGAPS
 
-def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean, 
-                rollstd, gaps, ngaps, sub, w=50, nsig=3, PLOT=False):
+def find_bounds(rr, cc, RR, CC, R0, C0, df, LINENUM, LENGTH, dat, rollmean, rollstd, GAPS, NGAPS, sub, w=50, NSIG=3, PLOT=False):
     M, sigma = np.median(sub), sub.std()/np.sqrt(len(sub))
 
-    lbounds = []
-    rbounds = []
+    LBOUNDS = []
+    RBOUNDS = []
     
-    if len(gaps)==0:
-        allgaps = np.array([np.argmin(np.abs(dat.c.values-C0)), 
+    if len(GAPS)==0:
+        ALLGAPS = np.array([np.argmin(np.abs(dat.c.values-C0)), 
                             np.argmin(np.abs(dat.c.values-CC.max()))])
     else:
-        allgaps = np.append(np.append(np.argmin(cc),gaps),np.argmax(cc))
+        ALLGAPS = np.append(np.append(np.argmin(cc),GAPS),np.argmax(cc))
     
-    for i in range(0,len(gaps)+1,2):
-        if length < 200:
-            lbound, rbound = fit_tophat(sub, CC, RR, dat, length, rollmean)
+    for i in range(0,len(GAPS)+1,2):
+        imaxs = np.where(rollmean==rollmean[ALLGAPS[i]:ALLGAPS[i+1]].max())[0]
+        imax = imaxs[(imaxs>=ALLGAPS[i])&(imaxs<=ALLGAPS[i+1])][0]
+        print(ALLGAPS[i],ALLGAPS[i+1],imax)
+
+        if LENGTH < 200:
+            lbound, rbound = fit_tophat(sub, CC, RR, dat, LENGTH, rollmean)
             lbound = 0
-            rbound = length
+            rbound = LENGTH
             leftC = dat.c.values[np.argmin(np.abs(dat.dx.values - lbound))]
             leftR = dat.r.values[np.argmin(np.abs(dat.dx.values - lbound))]
             rightC = dat.c.values[np.argmin(np.abs(dat.dx.values - rbound))]
             rightR = dat.r.values[np.argmin(np.abs(dat.dx.values - rbound))]
         else:
-            #print(allgaps[i],allgaps[i+1],rollmean[allgaps[i]:allgaps[i+1]],rollmean[allgaps[i]:allgaps[i+1]].max())
-            imaxs = np.where(rollmean==rollmean[allgaps[i]:allgaps[i+1]].max())[0]
-            #print(imaxs)
-            imax = imaxs[(imaxs>=allgaps[i])&(imaxs<=allgaps[i+1])][0]
-            #print(allgaps[i],allgaps[i+1],imax)
-            
             maxdx = dat.dx[imax]
             left = rollmean.iloc[:imax]
             leftdx = dat.dx[:imax]
             right = rollmean.iloc[imax:]
             rightdx = dat.dx[imax:]
             
-            wherelbound = np.where(left<nsig*sigma)[0]
+            wherelbound = np.where(left<NSIG*sigma)[0]
             if len(wherelbound)==0:
                 lbound = leftdx.min()
                 leftC = dat.c.min()
@@ -510,7 +507,7 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
                 leftC = dat.c.values[np.argmin(np.abs(dat.dx.values - lbound))]
                 leftR = dat.r.values[np.argmin(np.abs(dat.dx.values - lbound))]
                 
-            whererbound = np.where(right<nsig*sigma)[0]
+            whererbound = np.where(right<NSIG*sigma)[0]
             if len(whererbound)==0:
                 rbound = rightdx.max()
                 rightC = dat.c.max()
@@ -521,22 +518,22 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
                 rightR = dat.r.values[np.argmin(np.abs(dat.dx.values - rbound))]
                 
             
-        lbounds.append(min(lbound,rbound))
-        rbounds.append(max(lbound,rbound))
-        #print('LBOUND: ', lbound, 'RBOUND: ', rbound)
+        LBOUNDS.append(min(lbound,rbound))
+        RBOUNDS.append(max(lbound,rbound))
+        print('LBOUND: ', lbound, 'RBOUND: ', rbound)
 
     
-    if ngaps > 0:
-        dfline = df.loc[df.linenum==linenum]
-        newlinenums = linenum * np.ones(len(dfline))
+    if NGAPS > 0:
+        dfline = df.loc[df.linenum==LINENUM]
+        newlinenums = LINENUM * np.ones(len(dfline))
         newline = df.linenum.values.max() + 1
-        segs = np.digitize((dfline.c1+dfline.c2)/2,bins=allgaps)
+        segs = np.digitize((dfline.c1+dfline.c2)/2,bins=ALLGAPS)
         usegs = np.unique(segs)
         stopline = False
         linestop = 1
-        for i in range(0,len(rbounds)-1):
-            if rbounds[i]<lbounds[i+1]:
-                #print('newline')
+        for i in range(0,len(RBOUNDS)-1):
+            if RBOUNDS[i]<LBOUNDS[i+1]:
+                print('newline')
                 newlinenums[np.where(np.isin(segs,usegs[i+1:]))[0]] = newline
                 newline += 1
                 stopline = True
@@ -546,9 +543,9 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
         #import pdb
         #pdb.set_trace()
         df.loc[dfline.index,'linenum'] = newlinenums
-        lbounds = np.unique(lbounds[:linestop])
-        rbounds = np.unique(rbounds[:linestop])
-        #print('length of arrays: ', len(lbounds), len(rbounds))
+        LBOUNDS = np.unique(LBOUNDS[:linestop])
+        RBOUNDS = np.unique(RBOUNDS[:linestop])
+        print('length of arrays: ', len(LBOUNDS), len(RBOUNDS))
         
     if PLOT:
         fig, ax = plt.subplots(1,2,figsize=(10,5))
@@ -572,7 +569,7 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
         ax[1].axhline(M-sigma,ls='--',color='g',lw=1)
         plt.subplots_adjust(wspace=0.3)
 
-        for j in range(len(lbounds)):
+        for j in range(len(LBOUNDS)):
             ax[0].axvline(leftC,lw=0.5,color='g')
             ax[0].axvline(rightC,lw=0.5,color='b')
 
@@ -584,21 +581,21 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
         #plt.fill_between(rightdx,y1=right-rollstd.iloc[imax:ALLGAPS[i+1]],
         #                 y2=right+rollstd.iloc[imax:ALLGAPS[i+1]],alpha=0.5)
         
-        for j in range(len(np.unique(lbounds))):
-            ax[1].axvline(lbounds[0],lw=0.5,color='g')
-            ax[1].axvline(rbounds[0],lw=0.5,color='b')
+        for j in range(len(np.unique(LBOUNDS))):
+            ax[1].axvline(LBOUNDS[0],lw=0.5,color='g')
+            ax[1].axvline(RBOUNDS[0],lw=0.5,color='b')
         plt.show()
 
-    if len(lbounds) == 1:
-        newlength = rbounds[0] - lbounds[0]
+    if len(LBOUNDS) == 1:
+        NEWLENGTH = RBOUNDS[0] - LBOUNDS[0]
     else:
         print('there is a problem!!')
         return 
 
-    return df, lbounds, rbounds, newlength
+    return df, LBOUNDS, RBOUNDS, NEWLENGTH
 
 
-def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, nsig=3, nhalf=3, nclose=10, PLOT=False):
+def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, NSIG=3, NHALF=3, NCLOSE=10, PLOT=False):
     mask_fit = np.zeros((2048,2048))
     mask_fit[rr[(dat.dx.values>lbound)&(dat.dx.values<rbound)],
              cc[(dat.dx.values>lbound)&(dat.dx.values<rbound)]] = 1
@@ -613,8 +610,8 @@ def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, nsig=3, nhalf=3, nclose=
     amp, x0, sigma = popt
     sigma = np.abs(sigma)
     
-    halfwidth = min(max(np.round(nsig*sigma+0.5,0).astype(int),1),10)
-    #print('x0: {}, sigma: {}, halfwidth: {}'.format(x0,sigma,halfwidth))
+    halfwidth = min(max(np.round(NSIG*sigma+0.5,0).astype(int),1),10)
+    print('x0: {}, sigma: {}, halfwidth: {}'.format(x0,sigma,halfwidth))
     
     #width = np.sqrt(8*np.log(2)) * sigma + 1.
     #print(width/2)
@@ -625,25 +622,27 @@ def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, nsig=3, nhalf=3, nclose=
         plt.figure()
         plt.scatter(D,H)
         plt.plot(D,Hfit,c='r',lw=1)
-        plt.axvline(x0+nsig*sigma+0.5)
-        plt.axvline(x0-nsig*sigma-0.5)
+        plt.axvline(x0+NSIG*sigma+0.5)
+        plt.axvline(x0-NSIG*sigma-0.5)
         plt.show()
 
-    #print('binary closing')
+    print('binary closing')
     mask_new = morphology.binary_closing(morphology.binary_dilation(mask_fit.astype(np.uint8), 
-                                                                    morphology.disk(radius=nhalf*halfwidth)), 
-                                         morphology.disk(nclose))
-    #print('getting rr cc new')
+                                                                    morphology.disk(radius=NHALF*halfwidth)), 
+                                         morphology.disk(NCLOSE))
+    print('getting rr cc new')
     rr_new, cc_new = np.where(mask_new>0)[0], np.where(mask_new>0)[1]
     
     return mask_fit, mask_new, rr_new, cc_new, halfwidth
 
 
-def fit_tophat(sub, CC, RR, dat, length, rollmean, PLOT=False):
-    guess = [0,length/2,length,np.mean(sub[RR,CC])]
-    #print(guess)
+def fit_tophat(sub, CC, RR, dat, LENGTH, rollmean, PLOT=False):
+    #guess = [0,np.median(CC),CC.max()-CC.min(),
+    #         np.mean(sub[RR,CC])]
+    guess = [0,LENGTH/2,LENGTH,np.mean(sub[RR,CC])]
+    print(guess)
     res = minimize(objective, guess, args=(dat.dx.values, dat.h.values), method='Nelder-Mead')
-    #print(res.x)
+    print(res.x)
     baseline, hatmid, hatwidth, height = res.x
     lbound = dat.dx.values[np.argmin(np.abs(dat.c.values-(hatmid-hatwidth/2)))]
     rbound = dat.dx.values[np.argmin(np.abs(dat.c.values-(hatmid+hatwidth/2)))]
@@ -674,7 +673,7 @@ def find_edgetrails(sub, dat, EDGE_THRESHOLD=5):
     Rsplit = np.where(np.diff(np.where(np.sum(sub,axis=1)==0))[0]>1)[0]
     Rmin = np.where(np.sum(sub,axis=1)==0)[0][Rsplit][0]
     Rmax = np.where(np.sum(sub,axis=1)==0)[0][Rsplit+1][-1]
-    #print('Cmin: {},  Cmax: {}, Rmin: {}, Rmax: {}'.format(Cmin,Cmax,Rmin,Rmax))
+    print('Cmin: {},  Cmax: {}, Rmin: {}, Rmax: {}'.format(Cmin,Cmax,Rmin,Rmax))
 
     T = (dat.r2>=Rmax-EDGE_THRESHOLD)|(dat.r1>=Rmax-EDGE_THRESHOLD)
     B = (dat.r2<=Rmin+EDGE_THRESHOLD)|(dat.r1<=Rmin+EDGE_THRESHOLD)
@@ -700,179 +699,16 @@ def find_edgetrails(sub, dat, EDGE_THRESHOLD=5):
     
     return dat
 
-def median_filter_gpu(sub0, filter_radius=10, log=False):
-    import torch
-    import kornia
+def postproc(subrootfile, detectionfile):
+    subfile = '{}-sub.fits'.format(subrootfile)
+    outputfile = '{}-sattrail.hdf'.format(subrootfile)
     
-    if log:
-        print(f"CUDA available: {torch.cuda.is_available()}")
-        print(f"Image shape: {sub0.shape}")
-        print(f"Image dtype: {sub0.dtype}")
-
-    imgf32 = sub0.astype('float32')
-    img_tensor = torch.from_numpy(imgf32).float().unsqueeze(0).unsqueeze(0).cuda()
-
-    if log:
-        print(f"Tensor shape: {img_tensor.shape}")
-        print(f"Tensor is on: {img_tensor.device}")
-        print(f"Tensor is on: {img_tensor.device}")
-
-    w = 2 * filter_radius + 1
-    filtered = kornia.filters.median_blur(img_tensor, (w, w))
-    filter = filtered.squeeze().cpu().numpy()
-
-    return filter
-
-@nb.jit(nopython=True, parallel=True, cache=True)
-def fast_masked_median_filter(sub0, masksub_valid, R, C, radius=10):
-    """
-    Fast masked median filter using Numba - no boolean indexing.
+    sub0 = read_fits_file(subfile)
+    print(f"Image shape: {sub0.shape}")
+    print(f"Image dtype: {sub0.dtype}")
     
-    Args:
-        sub0: Padded image array
-        masksub_valid: Padded boolean mask (True = include in median)
-        R, C: Original coordinates (before padding) where to compute median
-        radius: Filter radius (10 for 21x21 window)
-    """
-    h, w = sub0.shape
-    h_orig = h - 2*radius
-    w_orig = w - 2*radius
-    
-    # Output array (original size, not padded)
-    filter_out = np.zeros((h_orig, w_orig), dtype=np.float32)
-    
-    for idx in nb.prange(len(R)):
-        r_orig = R[idx]  # Original coordinate
-        c_orig = C[idx]  # Original coordinate
-        
-        # Skip if out of bounds
-        if r_orig >= h_orig or c_orig >= w_orig or r_orig < 0 or c_orig < 0:
-            print('out of bounds')
-            continue
-        
-        # Adjust for padding
-        r_center = r_orig + radius
-        c_center = c_orig + radius
-        
-        # Manually collect valid values - NO BOOLEAN INDEXING
-        values_list = []
-        for dr in range(-radius, radius + 1):
-            for dc in range(-radius, radius + 1):
-                r_curr = r_center + dr
-                c_curr = c_center + dc
-                
-                # Check if this pixel is valid
-                if masksub_valid[r_curr, c_curr]:
-                    values_list.append(sub0[r_curr, c_curr])
-        
-        # Compute median if we have values
-        if len(values_list) > 0:
-            values_array = np.array(values_list, dtype=np.float32)
-            filter_out[r_orig, c_orig] = np.median(values_array)
-    
-    return filter_out
-    
-def median_filter_cpu(sub0, df0, mask, filter_radius=10, inner_radius=1, outer_radius=15):
-    cfit = np.arange(0,2048,1)
-    phl_mask = np.zeros((2048,2048))
-    for i in df0.linenum.unique():
-        seg = df0.loc[df0.linenum==i]
-        rfit = seg.slope.mean()*cfit + seg.b.mean()
-        inside = (rfit>=0)&(rfit<=2047)
-        c = cfit[inside]
-        r = np.round(rfit[inside],0).astype(int)
-        phl_mask[r,c] += 1
-
-    phl_mask_binary = (phl_mask > 0).astype(np.uint8)
-    inner = cv2.dilate(phl_mask_binary, morphology.disk(radius=inner_radius), 
-                       iterations=1).astype(np.float32)
-    outer = cv2.dilate(phl_mask_binary, morphology.disk(radius=outer_radius), 
-                       iterations=1).astype(np.float32)
-    R, C = np.where(outer == 1)
-    
-    # Step 1: Create validity mask
-    masksub_valid = (inner!=1)&(mask!=1)
-    
-    # Step 2: Pad the arrays
-    padded_sub = np.pad(sub0, filter_radius, mode='constant', constant_values=0).astype(np.float32)
-    masksub_valid_padded = np.pad(masksub_valid, filter_radius, mode='constant', 
-                                  constant_values=True)
-    
-    # Step 3: Run the filter
-    # R and C should be the ORIGINAL coordinates (not adjusted for padding)
-    filter = fast_masked_median_filter(padded_sub, masksub_valid_padded, 
-                                       R, C, radius=filter_radius)
-
-    return filter
-
-def progressive_hough_transform(edges, min_line_length=10, min_threshold=10, initial_threshold=100, initial_gap=50):
-    """
-    Progressively detect lines, removing them from consideration
-    to allow detection of weaker lines.
-    """
-    edges_copy = edges.copy()
-    all_lines = []
-    threshold = initial_threshold
-    lgap = initial_gap
-    
-    while (threshold>min_threshold)&(len(edges_copy[edges_copy>0])>0):
-        # Detect lines with current threshold
-        #print(threshold,lgap)
-        lines = phl(
-            edges_copy,
-            threshold=threshold,
-            line_length=min_line_length,
-            line_gap=lgap
-        )
-        
-        if len(lines) == 0:
-            #print('no lines')
-            # Lower threshold if no lines found
-            threshold = max(min_threshold, int(threshold * 0.5))
-            continue
-        
-        # Add detected lines
-        all_lines.extend(lines)
-        
-        # Remove detected lines from edge image
-        for L in lines:
-            (p0, p1) = L
-            # Draw black line to remove these edges
-            rr, cc = line(p0[1], p0[0], p1[1], p1[0])
-            # Dilate slightly to remove nearby edges
-            for r, c in zip(rr, cc):
-                buffer = 1
-                y_min = max(0, r - buffer)
-                y_max = min(edges_copy.shape[0], r + buffer + 1)
-                x_min = max(0, c - buffer)
-                x_max = min(edges_copy.shape[1], c + buffer + 1)
-                edges_copy[y_min:y_max, x_min:x_max] = 0
-        #print('n: ',len(edges_copy[edges_copy>0]))
-        
-        # Gradually decrease threshold
-        threshold = max(min_threshold, int(threshold * 0.5))
-        lgap = max(2,int(lgap*0.5))
-    return all_lines
-
-
-def postproc(subpath, subroot, detpath, outputpath, SAVE=False, PLOT=False, skeleton=False, progressive=True, gpu=False, 
-             filter_radius=10, nclose=10, nhalf=1, nsig=3, gap=2):
-    
-    outputfile = '{}{}-sattrail.hdf'.format(outputpath, subroot)
-    try:
-        subfile = '{}{}-sub.fits.fz'.format(subpath, subroot)
-        sub0 = read_fits_file(subfile)
-    except:
-        subfile = '{}{}-sub.fits'.format(subpath, subroot)
-        sub0 = read_fits_file(subfile)
-    try:
-        detectionfile = '{}{}-detection.json'.format(detpath, subroot)
-        with open(detectionfile, 'r') as f:
-            data = json.load(f)
-    except:
-        detectionfile = '{}detection_{}.json'.format(detpath, subroot)
-        with open(detectionfile, 'r') as f:
-            data = json.load(f)
+    with open(detectionfile, 'r') as f:
+        data = json.load(f)
     pixels = np.array(data['mask'])
 
     if len(pixels)==0:
@@ -882,89 +718,93 @@ def postproc(subpath, subroot, detpath, outputpath, SAVE=False, PLOT=False, skel
     mask = np.zeros((2048,2048))
     mask[pixels[:,1],pixels[:,0]] += 1
 
-    if skeleton:
-        maskphl = skeletonize(mask.astype(np.uint8)).astype('>f4')
-    else:
-        maskphl = mask
+    imgf32 = sub0.astype('float32')
+    img_tensor = torch.from_numpy(imgf32).float().unsqueeze(0).unsqueeze(0).cuda()
+    
+    print(f"Tensor shape: {img_tensor.shape}")
+    print(f"Tensor is on: {img_tensor.device}")
 
-    if progressive:
-        lines = progressive_hough_transform(maskphl, min_line_length=10, min_threshold=10,
-                                    initial_threshold=200, initial_gap=50)
-    else:
-        lines = phl(maskphl, threshold=10, line_length=10, line_gap=50)
-        
-    df0, slopes, bs = get_line_data(lines, PLOT=True)
+    print(f"Tensor is on: {img_tensor.device}")
 
-    dindex, numlines = collect_segments(sub0, df0, PLOT=True)
+    # OLD: rollingmedian = median_filter(sub0, size=21, mode='constant', cval=0)
+
+    # NEW:
+    filtered = kornia.filters.median_blur(img_tensor, (21, 21))
+    filtered_np = filtered.squeeze().cpu().numpy()
+
+    sub = sub0 - filtered_np
+
+    lines = phl(mask, threshold=20, line_length=10, line_gap=10)
+    df0, slopes, bs = get_line_data(lines)
+
+    dindex, NUMLINES = collect_segments(sub, df0, PLOT=False)
     df0['linenum'] = dindex
 
-    if gpu:
-        filtered = median_filter_gpu(sub0, df0, filter_radius=filter_radius)
-    else:
-        filtered = median_filter_cpu(sub0, df0, mask, filter_radius=filter_radius)
-
-    sub = sub0 - filtered
-
-    mask_master = np.zeros((2048,2048))
-    mask_del = np.zeros((2048,2048))
-    rpoints = []
-    cpoints = []
-    columns = ['linenum','length','c1','c2','r1','r2','cpix','rpix']
+    NCLOSE = 10
+    NHALF = 1
+    NSIG = 3
+    mask_MASTER = np.zeros((2048,2048))
+    mask_DEL = np.zeros((2048,2048))
+    RPOINTS = []
+    CPOINTS = []
+    COLUMNS = ['linenum','c1','c2','r1','r2','cpix','rpix']
     FINALLIST = pd.DataFrame()
-    maxi = 2
+    maxi = 2 #len(np.unique(df0.linenum.values))
     i = 0
     df = df0.copy()
     while i < maxi:
-        linenum = np.unique(df.linenum.values.astype(int))[i]
-        #print(linenum)
-        
-        RR, CC, length = total_line_coords(df, linenum=linenum, PLOT=PLOT)
-        #print('Length: ', length)
+        LINENUM = np.unique(df.linenum.values.astype(int))[i]
+        print(LINENUM)
+        RR, CC, LENGTH = total_line_coords(df, sub, LINENUM=LINENUM, PLOT=False)
+        print('Length: ', LENGTH)
         #plot_amplitude(RR, CC, sub);
-        
-        rr, cc, R0, C0, coefficients = fit_coords(RR, CC, length, sub, PLOT=PLOT)
-        gaps, ngaps = find_gaps(rr, cc, RR, CC, R0, C0, sub, gap=gap, w=50)
+        rr, cc, R0, C0, coefficients = fit_coords(RR, CC, LENGTH, sub, PLOT=False)
+        GAPS, NGAPS = find_gaps(rr, cc, RR, CC, R0, C0, sub, GAP=2, w=50)
         dat, rollmean, rollstd = rolling_mean(rr, cc, R0, C0, sub)
     
-        df, lbounds, rbounds, newlength = find_bounds(rr, cc, RR, CC, R0, C0, df, 
-                                                  linenum, length, dat, rollmean, rollstd, 
-                                                  gaps, ngaps, sub, nsig=4, PLOT=PLOT)
+        df, LBOUNDS, RBOUNDS, NEWLENGTH = find_bounds(rr, cc, RR, CC, R0, C0, df, 
+                                                  LINENUM, LENGTH, dat, rollmean, rollstd, 
+                                                  GAPS, NGAPS, sub, NSIG=4, PLOT=False)
     
-        if newlength > 200:
-            rr_end = rr[(dat.dx.values>lbounds[0])&(dat.dx.values<rbounds[0])]
-            cc_end = cc[(dat.dx.values>lbounds[0])&(dat.dx.values<rbounds[0])]
-
-            mask_fit, mask_new, rr_new, cc_new, halfwidth = fit_width(dat, lbounds[0], rbounds[0], rr, cc, R0, 
-                                                                      C0, sub, nsig, nhalf, nclose, PLOT=PLOT)
-        elif newlength < 200:
-            RR, CC, length = total_line_coords(df, linenum=linenum, PLOT=PLOT)
-            rr_end = RR 
-            cc_end = CC
-
+        if NEWLENGTH > 200:
+            rr_end = rr[(dat.dx.values>LBOUNDS[0])&(dat.dx.values<RBOUNDS[0])]
+            cc_end = cc[(dat.dx.values>LBOUNDS[0])&(dat.dx.values<RBOUNDS[0])]
+            #plt.figure()
+            #plt.scatter(cc_end, rr_end)
+            #plt.title(LINENUM)
+            #plt.show()
+            mask_fit, mask_new, rr_new, cc_new, halfwidth = fit_width(dat, LBOUNDS[0], RBOUNDS[0], rr, cc, R0, 
+                                                                      C0, sub, NSIG, NHALF, NCLOSE, PLOT=False)
+        elif NEWLENGTH < 200:
+            RR, CC, LENGTH = total_line_coords(df, sub, LINENUM=LINENUM, PLOT=False)
+            rr_end = RR # rr[(dat.dx.values>=0)&(dat.dx.values<=NEWLENGTH)]
+            cc_end = CC # cc[(dat.dx.values>=0)&(dat.dx.values<=NEWLENGTH)]
+            #plt.figure()
+            #plt.scatter(CC, RR)#cc_end, rr_end)
+            #plt.title(LINENUM)
+            #plt.show()
             mask_new = np.zeros((2048,2048))
             mask_new[RR,CC] += 1
-            mask_new = morphology.binary_closing(mask_new, morphology.disk(nclose))
-
-        mask_master += mask_new
-        
-        data = {'linenum':linenum,'length':newlength, 'c1':cc_end.min(),'c2':cc_end.max(),'r1':rr_end[np.argmin(cc_end)],
+            mask_new = morphology.binary_closing(mask_new, morphology.disk(NCLOSE))
+            
+        data = {'linenum':LINENUM,'c1':cc_end.min(),'c2':cc_end.max(),'r1':rr_end[np.argmin(cc_end)],
                 'r2':rr_end[np.argmax(cc_end)],'cpix':[cc_end],'rpix':[rr_end]}
-        newlist = pd.DataFrame(data)
-        FINALLIST = pd.concat([FINALLIST, newlist], ignore_index=True)
-
-        # points for sat_id:
-        lpoints = np.arange(0.,1.1,0.1)*length
+        NEWLIST = pd.DataFrame(data)
+        FINALLIST = pd.concat([FINALLIST, NEWLIST], ignore_index=True)
+        lpoints = np.arange(0.,1.1,0.1)*LENGTH #LENGTH+10,10)
         mids = np.argmin(np.abs(dat.dx.values-lpoints.reshape(1,len(lpoints)).T),axis=1)
-        cpoints.append(cc[mids])
-        rpoints.append(rr[mids])
-        
+        CPOINTS.append(cc[mids])#[cc_end.min(),list(cc[mid]),cc_end.max()])
+        RPOINTS.append(rr[mids])#[rr_end[np.argmin(cc_end)],list(rr[mid]),rr_end[np.argmax(cc_end)]])
+    
+        mask_MASTER += mask_new
+        #mask_fit, mask_new, rr_new, cc_new, halfwidth = fit_width(dat, LBOUNDS[0], RBOUNDS[0], rr, cc, R0, 
+        #                                                          C0, sub, NSIG=3, NHALF=2, NCLOSE=10, PLOT=False)
+        #mask_DEL += mask_new
         i += 1
         maxi = len(np.unique(df.linenum.values))
-        #print('\n')
+        print('\n')
+
 
     FINALLIST = find_edgetrails(sub, FINALLIST, EDGE_THRESHOLD=5)
-
-    if SAVE:
-        FINALLIST.to_hdf(outputfile, key='data')
     
-    return df0, FINALLIST, mask_master, cpoints, rpoints
+    return FINALLIST, CPOINTS, RPOINTS
