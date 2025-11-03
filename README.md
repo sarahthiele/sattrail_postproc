@@ -46,7 +46,8 @@ df0['linenum'] = dindex
 
 ## Oct 31 2025 updates:
 1. renamed new_postproc.py to just postproc.py
-2. 
+2. created run_postproc.py to allow for parameter intake to batch run the postprocessing across ihus
+3. began modifications to find_bounds() and collect_segments()
 
 ## Oct 26 2025 updates:
 __Changes needed (see further notes below):__
