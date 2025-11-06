@@ -90,7 +90,7 @@ def get_line_data(lines, PLOT=True):
 
     return df, slopes, bs
 
-def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
+def collect_segments(sub, line_data, plot=False, plot_individual=False):
     dfc = line_data.copy()
 
     # create line index array
@@ -114,7 +114,7 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
 
         # get line i points
         rr_i, cc_i = line(r2_i,c2_i,r1_i,c1_i)
-        
+
         for j in range(i+1,len(line_data)):  # go through rest of lines
 
             # get line j data
@@ -131,7 +131,7 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
             # get deviation of line j from line i
             dev_ij = np.abs(s_i * cc_j - rr_j + b_i) / np.sqrt(s_i**2 + 1)
 
-            # if line j deviates from the line of interest by more than X pixels 
+            # if line j deviates from the line of interest by more than X pixels
             # we assume they're not part of the same line
             if (dev_ij.max() < 10):
 
@@ -149,18 +149,18 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
                 rfit_linear = m * cfit + b
 
                 #m = (r_cmax-r_cmin)/(cmax-cmin)
-                #b = r_cmax - cmax * m 
+                #b = r_cmax - cmax * m
                 #dev = np.abs(m * c_all - r_all + b) / np.sqrt(m**2 + 1)
 
                 dev = np.abs(m * cfit - rfit_parabola + b) / np.sqrt(m**2 + 1)
                 devmax = max(dev)
-                
+
                 #L = np.sum(np.sqrt(np.diff(np.sort(c_all))**2 + np.diff(r_all[np.argsort(c_all)])**2))
                 L = np.sqrt((cmax-cmin)**2 + (r_cmax-r_cmin)**2)
                 dev_allowed = min(max(L**2/(8*1e5),2),10)
 
-                if PLOT_individual:
-                    fig, ax = plt.subplots(1,3, figsize=(12,3)) 
+                if plot_individual:
+                    fig, ax = plt.subplots(1,3, figsize=(12,3))
                     ax[0].imshow(sub, vmin=min_value, vmax=max_value, cmap='Greys_r')
                     ax[0].plot([c1_i,c2_i],[r1_i,r2_i])
                     ax[0].plot([c1_j,c2_j],[r1_j,r2_j])
@@ -177,7 +177,7 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
                     ax[2].set_title(devmax)
                 if devmax < dev_allowed:
                     #print('test append')
-                    if PLOT_individual:
+                    if plot_individual:
                         ax[0].set_title('same line: dev_ij = {}'.format((dev_ij.max())))
                     dindex[i,j] = j
                     dindex[j,i] = j
@@ -190,18 +190,18 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
                     s_i = (r2_i-r1_i)/(c2_i-c1_i)
                     b_i = r2_i - s_i*c2_i
                 else:
-                    if PLOT_individual:
+                    if plot_individual:
                         ax[0].set_title('different line: dev_ij = {:.4}'.format((dev_ij.max())))
-                    
+
         didx += 1
- 
+
     dindex = dindex.astype(int)
 
-    if PLOT:
+    if plot:
         plt.figure()
         plt.imshow(dindex)
-    
-    GROUPS = []
+
+    groups = []
     indexlist = np.unique(dindex[dindex>-1])
 
     while len(indexlist)>0:
@@ -212,25 +212,25 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
             in2 = np.unique(dindex[:,new][dindex[:,new]>-1])
             in1 = np.append(in1, in2)
             new = np.array(list(set(in2).difference(set(in1))))
-        GROUPS.append(in1)  # new group of lines
+        groups.append(in1)  # new group of lines
         indexlist = np.array(list(set(indexlist).difference(set(in1))))# new set of lines unaccounted for
-    
+
     dindex = np.zeros(len(line_data))
 
     linenum = 1
-    for i in range(len(GROUPS)):
-        dindex[GROUPS[i]] = linenum
+    for i in range(len(groups)):
+        dindex[groups[i]] = linenum
         linenum +=1
-    
-    NUMLINES = len(np.unique(dindex))
 
-    if PLOT:
+    numlines = len(np.unique(dindex))
+
+    if plot:
         fig, ax = plt.subplots(1,2,figsize=(8,4))
-        for i in range(1,NUMLINES+2):
+        for i in range(1,numlines+2):
             ax[0].scatter(line_data.slope.values[dindex==i],line_data.b.values[dindex==i],s=2,color=plt.colormaps['tab20'](i))
             for l in range(len(line_data.c1.values[dindex==i])):
                 ax[1].plot([line_data.c1.values[dindex==i][l],
-                            line_data.c2.values[dindex==i][l]], 
+                            line_data.c2.values[dindex==i][l]],
                            [line_data.r1.values[dindex==i][l],
                             line_data.r2.values[dindex==i][l]],
                           color=plt.colormaps['tab20'](i))
@@ -239,65 +239,65 @@ def collect_segments(sub, line_data, PLOT=False, PLOT_individual=False):
         ax[0].set_ylabel('y intercept')
         ax[1].set_xlabel('x')
         ax[1].set_ylabel('y')
-    
-    return dindex, NUMLINES
+
+    return dindex, numlines
 
 def perpendicular_line_profile(image, start_point, end_point, perp_range, num_perp_points=None):
     """
     Generate a profile showing amplitude as a function of perpendicular distance from a line.
-    
+
     Args:
         image: 2D numpy array
         start_point: (x, y) tuple for line start
         end_point: (x, y) tuple for line end
         perp_range: half-width of perpendicular sampling (e.g., 10 for -10 to +10)
         num_perp_points: number of perpendicular sampling points (default: 2*perp_range+1)
-    
+
     Returns:
         perp_distances: array of perpendicular distances from line
         amplitudes: array of summed pixel values at each perpendicular distance
     """
     x1, y1 = start_point
     x2, y2 = end_point
-    
+
     # Calculate line direction and perpendicular direction
     dx = x2 - x1
     dy = y2 - y1
     line_length = np.sqrt(dx**2 + dy**2)
-    
+
     # Unit vectors
     line_vec = np.array([dx, dy]) / line_length  # along the line
     perp_vec = np.array([-dy, dx]) / line_length  # perpendicular to line (90° rotation)
-    
+
     # Generate perpendicular distances
     if num_perp_points is None:
         num_perp_points = int(2 * perp_range) + 1
-    
+
     perp_distances = np.linspace(-perp_range, perp_range, num_perp_points)
-    
+
     # Number of points to sample along the line direction
     num_line_points = int(np.ceil(line_length)) + 1
     t = np.linspace(0, 1, num_line_points)
-    
+
     amplitudes = []
-    
+
     for perp_dist in perp_distances:
         # Create parallel line at this perpendicular distance
         offset = perp_dist * perp_vec
         parallel_start = np.array([x1, y1]) + offset
         parallel_end = np.array([x2, y2]) + offset
-        
+
         # Sample points along this parallel line
         parallel_points = np.outer(t, parallel_end - parallel_start) + parallel_start
-        
+
         # Extract pixel values along this parallel line
         x_coords = parallel_points[:, 0]
         y_coords = parallel_points[:, 1]
-        
+
         # Check bounds
         valid_mask = ((x_coords >= 0) & (x_coords < image.shape[1]) & 
                      (y_coords >= 0) & (y_coords < image.shape[0]))
-        
+
         if np.any(valid_mask):
             # Sample with bilinear interpolation
             sampled_values = map_coordinates(image, [y_coords[valid_mask], x_coords[valid_mask]], 
@@ -305,12 +305,12 @@ def perpendicular_line_profile(image, start_point, end_point, perp_range, num_pe
             total_amplitude = np.sum(sampled_values)
         else:
             total_amplitude = 0
-        
+
         amplitudes.append(total_amplitude)
-    
+
     return perp_distances, np.array(amplitudes)
 
-def total_line_coords(df, linenum, PLOT=False):
+def total_line_coords(df, linenum, plot=False):
     RR = []
     CC = []
 
@@ -327,7 +327,7 @@ def total_line_coords(df, linenum, PLOT=False):
             RR.append(rr)
             CC.append(cc)
 
-            if PLOT:
+            if plot:
                 r0 = rr.min()
                 c0 = cc[np.argmin(rr)]
                 dx = np.sqrt((rr-r0)**2 + (cc-c0)**2)
@@ -350,9 +350,9 @@ def total_line_coords(df, linenum, PLOT=False):
     ccsort = np.argsort(CC)
     CC = CC[ccsort]
     RR = RR[ccsort]
-    LENGTH = (np.sqrt((CC-CC.min())**2+(RR-RR[np.argmin(CC)])**2)).max()
-    
-    return RR, CC, LENGTH
+    length = (np.sqrt((CC-CC.min())**2+(RR-RR[np.argmin(CC)])**2)).max()
+
+    return RR, CC, length
 
 def find_common_pix(RR, CC, pixels):
     
@@ -635,7 +635,7 @@ def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, nsig=3, nhalf=3, nclose=
                                          morphology.disk(nclose))
     #print('getting rr cc new')
     rr_new, cc_new = np.where(mask_new>0)[0], np.where(mask_new>0)[1]
-    
+
     return mask_fit, mask_new, rr_new, cc_new, halfwidth
 
 
@@ -664,10 +664,10 @@ def fit_tophat(sub, CC, RR, dat, length, rollmean, PLOT=False):
         xfit = np.linspace(0,2048,100)
         ax[1].plot(xfit, tophat(xfit, *(res.x)))
         plt.show()
-        
+
     return lbound, rbound
 
-def find_edgetrails(sub, dat, EDGE_THRESHOLD=5):
+def find_edgetrails(sub, dat, edge_threshold=5):
     Csplit = np.where(np.diff(np.where(np.sum(sub,axis=0)==0))[0]>1)[0]
     Cmin = np.where(np.sum(sub,axis=0)==0)[0][Csplit][0]
     Cmax = np.where(np.sum(sub,axis=0)==0)[0][Csplit+1][-1]
@@ -676,10 +676,10 @@ def find_edgetrails(sub, dat, EDGE_THRESHOLD=5):
     Rmax = np.where(np.sum(sub,axis=1)==0)[0][Rsplit+1][-1]
     #print('Cmin: {},  Cmax: {}, Rmin: {}, Rmax: {}'.format(Cmin,Cmax,Rmin,Rmax))
 
-    T = (dat.r2>=Rmax-EDGE_THRESHOLD)|(dat.r1>=Rmax-EDGE_THRESHOLD)
-    B = (dat.r2<=Rmin+EDGE_THRESHOLD)|(dat.r1<=Rmin+EDGE_THRESHOLD)
-    R = (dat.c2>=Cmax-EDGE_THRESHOLD)
-    L = (dat.c1<=Cmin+EDGE_THRESHOLD)
+    T = (dat.r2>=Rmax-edge_threshold)|(dat.r1>=Rmax-edge_threshold)
+    B = (dat.r2<=Rmin+edge_threshold)|(dat.r1<=Rmin+edge_threshold)
+    R = (dat.c2>=Cmax-edge_threshold)
+    L = (dat.c1<=Cmin+edge_threshold)
 
     dat = dat.drop(columns=['linenum'])
     IOL = np.zeros(len(dat)).astype(int)
@@ -697,13 +697,13 @@ def find_edgetrails(sub, dat, EDGE_THRESHOLD=5):
     dat['IOR'] = IOR
     dat['IOT'] = IOT
     dat['IOB'] = IOB
-    
+
     return dat
 
 def median_filter_gpu(sub0, filter_radius=10, log=False):
     import torch
     import kornia
-    
+
     if log:
         print(f"CUDA available: {torch.cuda.is_available()}")
         print(f"Image shape: {sub0.shape}")
@@ -727,7 +727,7 @@ def median_filter_gpu(sub0, filter_radius=10, log=False):
 def fast_masked_median_filter(sub0, masksub_valid, R, C, radius=10):
     """
     Fast masked median filter using Numba - no boolean indexing.
-    
+
     Args:
         sub0: Padded image array
         masksub_valid: Padded boolean mask (True = include in median)
@@ -737,41 +737,41 @@ def fast_masked_median_filter(sub0, masksub_valid, R, C, radius=10):
     h, w = sub0.shape
     h_orig = h - 2*radius
     w_orig = w - 2*radius
-    
+
     # Output array (original size, not padded)
     filter_out = np.zeros((h_orig, w_orig), dtype=np.float32)
-    
+
     for idx in nb.prange(len(R)):
         r_orig = R[idx]  # Original coordinate
         c_orig = C[idx]  # Original coordinate
-        
+
         # Skip if out of bounds
         if r_orig >= h_orig or c_orig >= w_orig or r_orig < 0 or c_orig < 0:
             print('out of bounds')
             continue
-        
+
         # Adjust for padding
         r_center = r_orig + radius
         c_center = c_orig + radius
-        
+
         # Manually collect valid values - NO BOOLEAN INDEXING
         values_list = []
         for dr in range(-radius, radius + 1):
             for dc in range(-radius, radius + 1):
                 r_curr = r_center + dr
                 c_curr = c_center + dc
-                
+
                 # Check if this pixel is valid
                 if masksub_valid[r_curr, c_curr]:
                     values_list.append(sub0[r_curr, c_curr])
-        
+
         # Compute median if we have values
         if len(values_list) > 0:
             values_array = np.array(values_list, dtype=np.float32)
             filter_out[r_orig, c_orig] = np.median(values_array)
-    
+
     return filter_out
-    
+
 def median_filter_cpu(sub0, df0, mask, filter_radius=10, inner_radius=1, outer_radius=15):
     cfit = np.arange(0,2048,1)
     phl_mask = np.zeros((2048,2048))
@@ -784,60 +784,58 @@ def median_filter_cpu(sub0, df0, mask, filter_radius=10, inner_radius=1, outer_r
         phl_mask[r,c] += 1
 
     phl_mask_binary = (phl_mask > 0).astype(np.uint8)
-    inner = cv2.dilate(phl_mask_binary, morphology.disk(radius=inner_radius), 
+    inner = cv2.dilate(phl_mask_binary, morphology.disk(radius=inner_radius),
                        iterations=1).astype(np.float32)
-    outer = cv2.dilate(phl_mask_binary, morphology.disk(radius=outer_radius), 
+    outer = cv2.dilate(phl_mask_binary, morphology.disk(radius=outer_radius),
                        iterations=1).astype(np.float32)
     R, C = np.where(outer == 1)
-    
+
     # Step 1: Create validity mask
     masksub_valid = (inner!=1)&(mask!=1)
-    
+
     # Step 2: Pad the arrays
     padded_sub = np.pad(sub0, filter_radius, mode='constant', constant_values=0).astype(np.float32)
-    masksub_valid_padded = np.pad(masksub_valid, filter_radius, mode='constant', 
+    masksub_valid_padded = np.pad(masksub_valid, filter_radius, mode='constant',
                                   constant_values=True)
-    
+
     # Step 3: Run the filter
     # R and C should be the ORIGINAL coordinates (not adjusted for padding)
-    filter = fast_masked_median_filter(padded_sub, masksub_valid_padded, 
+    filter = fast_masked_median_filter(padded_sub, masksub_valid_padded,
                                        R, C, radius=filter_radius)
 
     return filter
 
 def progressive_hough_transform(edges, min_line_length=10, min_threshold=10, initial_threshold=100, initial_gap=50):
     """
-    Progressively detect lines, removing them from consideration
-    to allow detection of weaker lines.
+    Progressively detect lines, removing them from consideration to allow detection of weaker lines.
     """
     edges_copy = edges.copy()
     all_lines = []
     threshold = initial_threshold
     lgap = initial_gap
-    
+
     while (threshold>min_threshold)&(len(edges_copy[edges_copy>0])>0):
         # Detect lines with current threshold
-        #print(threshold,lgap)
         lines = phl(
             edges_copy,
             threshold=threshold,
             line_length=min_line_length,
             line_gap=lgap
         )
-        
+
         if len(lines) == 0:
             #print('no lines')
             # Lower threshold if no lines found
             threshold = max(min_threshold, int(threshold * 0.5))
             continue
-        
+
         # Add detected lines
         all_lines.extend(lines)
-        
+
         # Remove detected lines from edge image
         for L in lines:
             (p0, p1) = L
-            # Draw black line to remove these edges
+            # Draw line to remove these edges
             rr, cc = line(p0[1], p0[0], p1[1], p1[0])
             # Dilate slightly to remove nearby edges
             for r, c in zip(rr, cc):
@@ -847,17 +845,15 @@ def progressive_hough_transform(edges, min_line_length=10, min_threshold=10, ini
                 x_min = max(0, c - buffer)
                 x_max = min(edges_copy.shape[1], c + buffer + 1)
                 edges_copy[y_min:y_max, x_min:x_max] = 0
-        #print('n: ',len(edges_copy[edges_copy>0]))
-        
+
         # Gradually decrease threshold
         threshold = max(min_threshold, int(threshold * 0.5))
         lgap = max(2,int(lgap*0.5))
-    return all_lines
 
+     return all_lines
 
-def postproc(subfile, detfile, outputfile, plotroot, SAVE=True, PLOT=False,
-             skeleton=False, progressive=True, gpu=False, filter_radius=10,
-             nclose=10, nhalf=1, nsig=3, gap=2):
+def postproc(subfile, detfile, outputfile, plotroot, save, plot, skeleton,
+             progressive, gpu, filter_radius, nclose, nhalf, nsig, gap):
 
     sub0 = read_fits_file(subfile)
     with open(detfile, 'r') as f:
@@ -882,9 +878,9 @@ def postproc(subfile, detfile, outputfile, plotroot, SAVE=True, PLOT=False,
     else:
         lines = phl(maskphl, threshold=10, line_length=10, line_gap=50)
 
-    df0, slopes, bs = get_line_data(lines, PLOT=True)
+    df0, slopes, bs = get_line_data(lines, plot=plot)
 
-    dindex, numlines = collect_segments(sub0, df0, PLOT=True)
+    dindex, numlines = collect_segments(sub=sub0, line_data=df0, plot=plot)
     df0['linenum'] = dindex
 
     if gpu:
@@ -899,16 +895,14 @@ def postproc(subfile, detfile, outputfile, plotroot, SAVE=True, PLOT=False,
     rpoints = []
     cpoints = []
     columns = ['linenum','length','c1','c2','r1','r2','cpix','rpix']
-    FINALLIST = pd.DataFrame()
+    traillist = pd.DataFrame()
     maxi = 2
     i = 0
     df = df0.copy()
     while i < maxi:
         linenum = np.unique(df.linenum.values.astype(int))[i]
-        #print(linenum)
 
         RR, CC, length = total_line_coords(df, linenum=linenum, PLOT=PLOT)
-        #print('Length: ', length)
         #plot_amplitude(RR, CC, sub);
 
         rr, cc, R0, C0, coefficients = fit_coords(RR, CC, length, sub, PLOT=PLOT)
@@ -927,7 +921,7 @@ def postproc(subfile, detfile, outputfile, plotroot, SAVE=True, PLOT=False,
                                                                       C0, sub, nsig, nhalf, nclose, PLOT=PLOT)
         elif newlength < 200:
             RR, CC, length = total_line_coords(df, linenum=linenum, PLOT=PLOT)
-            rr_end = RR 
+            rr_end = RR
             cc_end = CC
 
             mask_new = np.zeros((2048,2048))
@@ -939,7 +933,7 @@ def postproc(subfile, detfile, outputfile, plotroot, SAVE=True, PLOT=False,
         data = {'linenum':linenum,'length':newlength, 'c1':cc_end.min(),'c2':cc_end.max(),'r1':rr_end[np.argmin(cc_end)],
                 'r2':rr_end[np.argmax(cc_end)],'cpix':[cc_end],'rpix':[rr_end]}
         newlist = pd.DataFrame(data)
-        FINALLIST = pd.concat([FINALLIST, newlist], ignore_index=True)
+        traillist = pd.concat([traillist, newlist], ignore_index=True)
 
         # points for sat_id:
         lpoints = np.arange(0.,1.1,0.1)*length
@@ -951,9 +945,9 @@ def postproc(subfile, detfile, outputfile, plotroot, SAVE=True, PLOT=False,
         maxi = len(np.unique(df.linenum.values))
         #print('\n')
 
-    FINALLIST = find_edgetrails(sub, FINALLIST, EDGE_THRESHOLD=5)
+    traillist = find_edgetrails(sub, traillist)
 
-    if SAVE:
-        FINALLIST.to_hdf(outputfile, key='data')
+    if save:
+        traillist.to_hdf(outputfile, key='data')
 
-    return df0, FINALLIST, mask_master, cpoints, rpoints
+    return df0, traillist, mask_master, cpoints, rpoints
