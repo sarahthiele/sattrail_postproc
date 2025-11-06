@@ -48,16 +48,16 @@ def gauss(x, a, x0, sigma):
 def gauss_with_linear(x, a, x0, sigma, b, c):
     return a * np.exp(-(x - x0)**2 / (2 * sigma**2)) + b * x + c
 
-def get_line_data(lines, PLOT=True):
+def get_line_data(lines, plot=True):
     '''
-    Make a pandas DataFrame of all of the lines that result from 
+    Make a pandas DataFrame of all of the lines that result from
     applying the Hough transform to the NN detection. Rejects any
-    lines that have slopes with 0.5 degrees of 90, which should 
+    lines that have slopes with 0.5 degrees of 90, which should
     discard any star lines that have accidentally been detected.
 
     Inputs:
     lines --- output from probabilistic Hough transform)
-    PLOT  --- [boolean], whether to plot Hough lines 
+    plot  --- [boolean], whether to plot Hough lines
     '''
     c1s=np.array([])
     c2s=np.array([])
@@ -71,7 +71,7 @@ def get_line_data(lines, PLOT=True):
         if np.abs(np.abs(np.arctan2(r2-r1,c2-c1)*180/np.pi)-90)>0.5:
             m = (r2-r1)/(c2-c1)
             b = r2 - m*c2
-            if PLOT:
+            if plot:
                 plt.plot([c1,c2],[r1,r2])
             c1s = np.append(c1s,c1)
             r1s = np.append(r1s,r1)
@@ -97,9 +97,6 @@ def collect_segments(sub, line_data, plot=False, plot_individual=False):
     dindex = np.ones((len(dfc),len(dfc)))*-1
 
     didx = 1
-
-    XFIT = np.arange(0,2048,1)
-    DEV_IJ = []
 
     for i in range(len(line_data)):  # line of interest
         dindex[i,i] = i
@@ -355,7 +352,7 @@ def total_line_coords(df, linenum, plot=False):
     return RR, CC, length
 
 def find_common_pix(RR, CC, pixels):
-    
+
     test = np.vstack([(CC,RR)]).T
     set1 = set(map(tuple, test))
     set2 = set(map(tuple, pixels))
@@ -366,8 +363,8 @@ def find_common_pix(RR, CC, pixels):
     CCpx = shared_array[:,0]
     RRpx = shared_array[:,1]
 
-    # OR might change this function later for:
-    
+    # OR:
+
     # Find pairs in array1 that are not in array2
     diff1 = set1 - set2
     # Convert back to array if needed
@@ -378,7 +375,7 @@ def find_common_pix(RR, CC, pixels):
     unique_to_array2 = np.array(list(diff2))
 
     diff = np.array(list(set2.difference(set1)))
-    
+
     return RRpx, CCpx
 
 def plot_amplitude(RR, CC, sub):
@@ -400,10 +397,10 @@ def plot_amplitude(RR, CC, sub):
     ax[1].axhline(0,c='k')
     ax[1].set_xlabel('y')
     plt.show()
-    
+
     return
 
-def fit_coords(RR, CC, length, sub, PLOT=False):
+def fit_coords(RR, CC, length, sub, plot=False):
     if length > 200:
         coefficients = np.polyfit(CC, RR, 2)
     else:
@@ -426,14 +423,14 @@ def fit_coords(RR, CC, length, sub, PLOT=False):
     cc = x_fit
     rr = y_fit
 
-    if PLOT:
+    if plot:
         plt.figure()
         plt.imshow(sub,vmin=min_value,vmax=max_value,origin='lower',cmap='Greys_r')
         plt.scatter(CC,RR,s=0.5)
         plt.plot(cc, rr,c='r',lw=0.3)
         plt.scatter(C0,R0,c='g',s=10)
         plt.show()
-        
+
     return rr, cc, R0, C0, coefficients
 
 def rolling_mean(rr, cc, R0, C0, sub, w=50):
@@ -444,40 +441,38 @@ def rolling_mean(rr, cc, R0, C0, sub, w=50):
 
     rollmean = dat['h'].rolling(window=w,center=True).mean()
     rollstd = dat['h'].rolling(window=w,center=True).std() / np.sqrt(w)
-    
+
     return dat, rollmean, rollstd
-    
 
 def find_gaps(rr, cc, RR, CC, R0, C0, sub, gap=2, w=50):
 
-    datgap = pd.DataFrame(np.array([CC,RR,np.sqrt((CC-C0)**2+(RR-R0)**2),sub[RR,CC]]).T, 
+    datgap = pd.DataFrame(np.array([CC,RR,np.sqrt((CC-C0)**2+(RR-R0)**2),sub[RR,CC]]).T,
                           columns=['c','r','dx','h']).sort_values('dx').reset_index(drop=True)
     datgap['sep'] = np.append(0,datgap.dx.values[1:]-datgap.dx.values[:-1])
-    
+
     gapsi = np.sort(np.append(datgap.loc[datgap.sep>gap].index.values-1, 
                               datgap.loc[datgap.sep>gap].index.values))
     ngaps = len(datgap.loc[datgap.sep>gap])
-    #print('NGAPS: ', ngaps)
-    
+
     gaps = np.array([])
     for i in range(len(gapsi)):
         gaps = np.append(gaps, np.argmin(np.abs(cc-datgap.loc[gapsi].c.values[i])))
 
     return gaps.astype(int), ngaps
 
-def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean, 
-                rollstd, gaps, ngaps, sub, w=50, nsig=3, PLOT=False):
+def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
+                rollstd, gaps, ngaps, sub, w=50, nsig=3, plot=False):
     M, sigma = np.median(sub), sub.std()/np.sqrt(len(sub))
 
     lbounds = []
     rbounds = []
-    
+
     if len(gaps)==0:
-        allgaps = np.array([np.argmin(np.abs(dat.c.values-C0)), 
+        allgaps = np.array([np.argmin(np.abs(dat.c.values-C0)),
                             np.argmin(np.abs(dat.c.values-CC.max()))])
     else:
         allgaps = np.append(np.append(np.argmin(cc),gaps),np.argmax(cc))
-    
+
     for i in range(0,len(gaps)+1,2):
         if length < 200:
             lbound, rbound = fit_tophat(sub, CC, RR, dat, length, rollmean)
@@ -493,13 +488,13 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
             #print(imaxs)
             imax = imaxs[(imaxs>=allgaps[i])&(imaxs<=allgaps[i+1])][0]
             #print(allgaps[i],allgaps[i+1],imax)
-            
+
             maxdx = dat.dx[imax]
             left = rollmean.iloc[:imax]
             leftdx = dat.dx[:imax]
             right = rollmean.iloc[imax:]
             rightdx = dat.dx[imax:]
-            
+
             wherelbound = np.where(left<nsig*sigma)[0]
             if len(wherelbound)==0:
                 lbound = leftdx.min()
@@ -509,7 +504,7 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
                 lbound = leftdx.values[wherelbound].max() + w/2
                 leftC = dat.c.values[np.argmin(np.abs(dat.dx.values - lbound))]
                 leftR = dat.r.values[np.argmin(np.abs(dat.dx.values - lbound))]
-                
+
             whererbound = np.where(right<nsig*sigma)[0]
             if len(whererbound)==0:
                 rbound = rightdx.max()
@@ -519,13 +514,11 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
                 rbound = rightdx.values[whererbound].min() - w/2
                 rightC = dat.c.values[np.argmin(np.abs(dat.dx.values - rbound))]
                 rightR = dat.r.values[np.argmin(np.abs(dat.dx.values - rbound))]
-                
-            
+
         lbounds.append(min(lbound,rbound))
         rbounds.append(max(lbound,rbound))
         #print('LBOUND: ', lbound, 'RBOUND: ', rbound)
 
-    
     if ngaps > 0:
         dfline = df.loc[df.linenum==linenum]
         newlinenums = linenum * np.ones(len(dfline))
@@ -549,8 +542,8 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
         lbounds = np.unique(lbounds[:linestop])
         rbounds = np.unique(rbounds[:linestop])
         #print('length of arrays: ', len(lbounds), len(rbounds))
-        
-    if PLOT:
+
+    if plot:
         fig, ax = plt.subplots(1,2,figsize=(10,5))
         ax[0].imshow(sub, origin='lower',vmin=min_value,vmax=max_value, cmap='Greys_r')
         ax[0].plot(dat.c.values,dat.r.values, lw=0.1,c='r')
@@ -575,15 +568,6 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
         for j in range(len(lbounds)):
             ax[0].axvline(leftC,lw=0.5,color='g')
             ax[0].axvline(rightC,lw=0.5,color='b')
-
-        #plt.axvline(maxdx,c='r')
-       # plt.plot(leftdx,left,lw=1)
-        #plt.fill_between(leftdx,y1=left-rollstd.iloc[ALLGAPS[i]:imax],
-        #                 y2=left+rollstd.iloc[ALLGAPS[i]:imax],alpha=0.5)
-        #plt.plot(rightdx,right)
-        #plt.fill_between(rightdx,y1=right-rollstd.iloc[imax:ALLGAPS[i+1]],
-        #                 y2=right+rollstd.iloc[imax:ALLGAPS[i+1]],alpha=0.5)
-        
         for j in range(len(np.unique(lbounds))):
             ax[1].axvline(lbounds[0],lw=0.5,color='g')
             ax[1].axvline(rbounds[0],lw=0.5,color='b')
@@ -593,35 +577,35 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
         newlength = rbounds[0] - lbounds[0]
     else:
         print('there is a problem!!')
-        return 
+        return
 
     return df, lbounds, rbounds, newlength
 
 
-def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, nsig=3, nhalf=3, nclose=10, PLOT=False):
+def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, nsig=3, nhalf=3, nclose=10, plot=False):
     mask_fit = np.zeros((2048,2048))
     mask_fit[rr[(dat.dx.values>lbound)&(dat.dx.values<rbound)],
              cc[(dat.dx.values>lbound)&(dat.dx.values<rbound)]] = 1
 
-    D, H = perpendicular_line_profile(sub, (cc[finder(cc,C0)], rr[finder(cc,C0)]), 
-                                      (cc[finder(cc,C0+30)], rr[finder(cc,C0+30)]), 
+    D, H = perpendicular_line_profile(sub, (cc[finder(cc,C0)], rr[finder(cc,C0)]),
+                                      (cc[finder(cc,C0+30)], rr[finder(cc,C0+30)]),
                                       10, num_perp_points=None)
-    
+
     #gauss(x, a, x0, sigma, offset) or gauss_with_linear(x, a, x0, sigma, b, c)
     p0 = [100,0,0.5]
     popt, _ = curve_fit(gauss, D, H, p0)
     amp, x0, sigma = popt
     sigma = np.abs(sigma)
-    
+
     halfwidth = min(max(np.round(nsig*sigma+0.5,0).astype(int),1),10)
     #print('x0: {}, sigma: {}, halfwidth: {}'.format(x0,sigma,halfwidth))
-    
+
     #width = np.sqrt(8*np.log(2)) * sigma + 1.
     #print(width/2)
-        
+
     Hfit = gauss(D, *popt)
-    
-    if PLOT:
+
+    if plot:
         plt.figure()
         plt.scatter(D,H)
         plt.plot(D,Hfit,c='r',lw=1)
@@ -630,8 +614,8 @@ def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, nsig=3, nhalf=3, nclose=
         plt.show()
 
     #print('binary closing')
-    mask_new = morphology.binary_closing(morphology.binary_dilation(mask_fit.astype(np.uint8), 
-                                                                    morphology.disk(radius=nhalf*halfwidth)), 
+    mask_new = morphology.binary_closing(morphology.binary_dilation(mask_fit.astype(np.uint8),
+                                                                    morphology.disk(radius=nhalf*halfwidth)),
                                          morphology.disk(nclose))
     #print('getting rr cc new')
     rr_new, cc_new = np.where(mask_new>0)[0], np.where(mask_new>0)[1]
@@ -639,7 +623,7 @@ def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, nsig=3, nhalf=3, nclose=
     return mask_fit, mask_new, rr_new, cc_new, halfwidth
 
 
-def fit_tophat(sub, CC, RR, dat, length, rollmean, PLOT=False):
+def fit_tophat(sub, CC, RR, dat, length, rollmean, plot=False):
     guess = [0,length/2,length,np.mean(sub[RR,CC])]
     #print(guess)
     res = minimize(objective, guess, args=(dat.dx.values, dat.h.values), method='Nelder-Mead')
@@ -650,7 +634,7 @@ def fit_tophat(sub, CC, RR, dat, length, rollmean, PLOT=False):
     lbound = hatmid - hatwidth / 2
     rbound = hatmid + hatwidth / 2
 
-    if PLOT:
+    if plot:
         fig, ax = plt.subplots(1,2)
         ax[0].imshow(sub,origin='lower',
                      vmin=min_value,
@@ -861,8 +845,10 @@ def postproc(subfile, detfile, outputfile, plotroot, save, plot, skeleton,
     pixels = np.array(data['mask'])
 
     if len(pixels)==0:
-        dat = pd.DataFrame([0],columns=['numlines'])
-        dat.to_hdf(outputfile,key='numlines')
+        if save:
+            dat = pd.DataFrame([0],columns=['numlines'])
+            dat.to_hdf(outputfile,key='numlines')
+        return [0], [0], [0], [0]
 
     mask = np.zeros((2048,2048))
     mask[pixels[:,1],pixels[:,0]] += 1
@@ -902,23 +888,23 @@ def postproc(subfile, detfile, outputfile, plotroot, save, plot, skeleton,
     while i < maxi:
         linenum = np.unique(df.linenum.values.astype(int))[i]
 
-        RR, CC, length = total_line_coords(df, linenum=linenum, PLOT=PLOT)
+        RR, CC, length = total_line_coords(df, linenum=linenum, plot=plot)
         #plot_amplitude(RR, CC, sub);
 
-        rr, cc, R0, C0, coefficients = fit_coords(RR, CC, length, sub, PLOT=PLOT)
+        rr, cc, R0, C0, coefficients = fit_coords(RR, CC, length, sub, plot=plot)
         gaps, ngaps = find_gaps(rr, cc, RR, CC, R0, C0, sub, gap=gap, w=50)
         dat, rollmean, rollstd = rolling_mean(rr, cc, R0, C0, sub)
 
         df, lbounds, rbounds, newlength = find_bounds(rr, cc, RR, CC, R0, C0, df,
                                                   linenum, length, dat, rollmean, rollstd,
-                                                  gaps, ngaps, sub, nsig=4, PLOT=PLOT)
+                                                  gaps, ngaps, sub, nsig=4, plot=plot)
 
         if newlength > 200:
             rr_end = rr[(dat.dx.values>lbounds[0])&(dat.dx.values<rbounds[0])]
             cc_end = cc[(dat.dx.values>lbounds[0])&(dat.dx.values<rbounds[0])]
 
             mask_fit, mask_new, rr_new, cc_new, halfwidth = fit_width(dat, lbounds[0], rbounds[0], rr, cc, R0,
-                                                                      C0, sub, nsig, nhalf, nclose, PLOT=PLOT)
+                                                                      C0, sub, nsig, nhalf, nclose, plot=plot)
         elif newlength < 200:
             RR, CC, length = total_line_coords(df, linenum=linenum, PLOT=PLOT)
             rr_end = RR
