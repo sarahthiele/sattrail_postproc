@@ -10,22 +10,20 @@ from scipy.ndimage import binary_dilation
 import skimage.morphology as morphology
 from skimage.morphology import binary_erosion
 from scipy.optimize import curve_fit, minimize
-from sklearn.mixture import GaussianMixture
-from sklearn.cluster import SpectralClustering
 from scipy.ndimage import map_coordinates
 from scipy.ndimage import median_filter
 from skimage.morphology import skeletonize, thin, medial_axis
-import subprocess
-import time
 import numba as nb
 import cv2
-
-import sys
-sys.path.append('../identify_sats')
-from generate_astrometry import *
-ihu_table = pd.read_hdf('../identify_sats/IHU_TABLE.hdf')
+import os
 
 zscale = ZScaleInterval()
+
+#import sys
+#sys.path.append('/home/sthiele/proj/repos/sattrail_postproc/identify_sats')
+#from generate_astrometry import *
+#ihu_table = pd.read_hdf('/home/sthiele/proj/repos/sattrail_postproc/identify_sats/IHU_TABLE.hdf')
+
 
 def read_fits_file(filename):
     img = fits.getdata(filename)
@@ -48,7 +46,7 @@ def gauss(x, a, x0, sigma):
 def gauss_with_linear(x, a, x0, sigma, b, c):
     return a * np.exp(-(x - x0)**2 / (2 * sigma**2)) + b * x + c
 
-def get_line_data(lines, plot=True):
+def get_line_data(lines, plot=True, plotroot='~'):
     '''
     Make a pandas DataFrame of all of the lines that result from
     applying the Hough transform to the NN detection. Rejects any
@@ -66,6 +64,8 @@ def get_line_data(lines, plot=True):
     slopes = np.array([])
     bs = np.array([])
 
+    if plot:
+        plt.figure()
     for i, L in enumerate(lines):
         ((c1,r1),(c2,r2))=L
         if np.abs(np.abs(np.arctan2(r2-r1,c2-c1)*180/np.pi)-90)>0.5:
@@ -79,18 +79,19 @@ def get_line_data(lines, plot=True):
             r2s = np.append(r2s,r2)
             slopes = np.append(slopes,m)
             bs = np.append(bs,b)
+    if plot:
+        plt.savefig(plotroot+'-init_line_data.png',bbox_inches='tight')
 
     df = pd.DataFrame(np.array([slopes, bs, c1s, c2s, r1s, r2s]).T,
                     columns=['slope','b', 'c1', 'c2', 'r1',
-                             'r2']).sort_values(by=['slope','b',
-                                                    'c1']).reset_index(drop=True)
+                             'r2']).sort_values(by=['slope','b']).reset_index(drop=True)
 
     slopes = df.slope.values
     cs = df.b.values
 
     return df, slopes, bs
 
-def collect_segments(sub, line_data, plot=False, plot_individual=False):
+def collect_segments_old(sub, line_data, max_R=1e5, plot=False, plotroot='~', plot_individual=False):
     dfc = line_data.copy()
 
     # create line index array
@@ -107,6 +108,7 @@ def collect_segments(sub, line_data, plot=False, plot_individual=False):
         r1_i = int(dfc.loc[i].r1)
         r2_i = int(dfc.loc[i].r2)
         s_i = dfc.loc[i].slope
+        theta_i = np.arctan(s_i)
         b_i = dfc.loc[i].b
 
         # get line i points
@@ -120,17 +122,25 @@ def collect_segments(sub, line_data, plot=False, plot_individual=False):
             r1_j = int(dfc.loc[j].r1)
             r2_j = int(dfc.loc[j].r2)
             s_j = dfc.loc[j].slope
+            theta_j = np.arctan(s_j)
             b_j = dfc.loc[j].b
 
             # get line j points
             rr_j, cc_j = line(r2_j,c2_j,r1_j,c1_j)
 
+            # get fit j points
+            ccj_fit = np.arange(0,2047,1)
+            rrj_fit = s_j * ccj_fit + b_j
+            ccj_fit = ccj_fit[(rrj_fit>=0)&(rrj_fit<=2047)]
+            rrj_fit = rrj_fit[(rrj_fit>=0)&(rrj_fit<=2047)]
+
             # get deviation of line j from line i
-            dev_ij = np.abs(s_i * cc_j - rr_j + b_i) / np.sqrt(s_i**2 + 1)
+            #dev_ij = np.abs(s_i * cc_j - rr_j + b_i) / np.sqrt(s_i**2 + 1)
+            dev_ij = np.abs(s_i * ccj_fit - rrj_fit + b_i) / np.sqrt(s_i**2 + 1)
 
             # if line j deviates from the line of interest by more than X pixels
-            # we assume they're not part of the same line
-            if (dev_ij.max() < 10):
+            # we assume they're definitely not part of the same line
+            if (dev_ij.max() < 20):#|(np.abs(theta_i-theta_j)<20):
 
                 # combine points into one line
                 c_all = np.append(cc_i,cc_j)
@@ -140,6 +150,7 @@ def collect_segments(sub, line_data, plot=False, plot_individual=False):
                 r_cmin, r_cmax = r_all[np.argmin(c_all)], r_all[np.argmax(c_all)]
                 cfit = np.arange(cmin,cmax+1,1)
 
+                # fit a straight line and a parabola to the points
                 m, b = np.polyfit(c_all, r_all, 1)
                 poly_parabola = np.poly1d(np.polyfit(c_all, r_all, 2))
                 rfit_parabola = poly_parabola(cfit)
@@ -149,15 +160,16 @@ def collect_segments(sub, line_data, plot=False, plot_individual=False):
                 #b = r_cmax - cmax * m
                 #dev = np.abs(m * c_all - r_all + b) / np.sqrt(m**2 + 1)
 
+                # calculate deviation 
                 dev = np.abs(m * cfit - rfit_parabola + b) / np.sqrt(m**2 + 1)
                 devmax = max(dev)
 
-                #L = np.sum(np.sqrt(np.diff(np.sort(c_all))**2 + np.diff(r_all[np.argsort(c_all)])**2))
                 L = np.sqrt((cmax-cmin)**2 + (r_cmax-r_cmin)**2)
-                dev_allowed = min(max(L**2/(8*1e5),2),10)
+                dev_allowed = min(max(L**2/(8*max_R),2),10)
 
                 if plot_individual:
                     fig, ax = plt.subplots(1,3, figsize=(12,3))
+                    min_value, max_value = zscale.get_limits(sub)
                     ax[0].imshow(sub, vmin=min_value, vmax=max_value, cmap='Greys_r')
                     ax[0].plot([c1_i,c2_i],[r1_i,r2_i])
                     ax[0].plot([c1_j,c2_j],[r1_j,r2_j])
@@ -166,9 +178,7 @@ def collect_segments(sub, line_data, plot=False, plot_individual=False):
 
                     ax[1].scatter(c_all, r_all,s=1)
                     ax[1].scatter(cfit, m*cfit+b,s=1)#rfit_linear,s=1)
-                    #ax[1].scatter(cfit, rfit_parabola,s=1)
 
-                    #ax[2].scatter(cfit,dev)
                     ax[2].scatter(c_all,dev,s=1)
                     ax[2].axhline(dev_allowed,ls='--',color='xkcd:grey',alpha=0.7)
                     ax[2].set_title(devmax)
@@ -176,6 +186,7 @@ def collect_segments(sub, line_data, plot=False, plot_individual=False):
                     #print('test append')
                     if plot_individual:
                         ax[0].set_title('same line: dev_ij = {}'.format((dev_ij.max())))
+                        plt.show()
                     dindex[i,j] = j
                     dindex[j,i] = j
                     cc_i = c_all
@@ -189,6 +200,12 @@ def collect_segments(sub, line_data, plot=False, plot_individual=False):
                 else:
                     if plot_individual:
                         ax[0].set_title('different line: dev_ij = {:.4}'.format((dev_ij.max())))
+                        plt.show()
+                    # assume that the rest of the lines also don't fit since the line data is
+                    # sorted by slope
+                    #break
+            else:
+                continue
 
         didx += 1
 
@@ -197,6 +214,7 @@ def collect_segments(sub, line_data, plot=False, plot_individual=False):
     if plot:
         plt.figure()
         plt.imshow(dindex)
+        plt.savefig(plotroot+'-line_index_dis.png', bbox_inches='tight')
 
     groups = []
     indexlist = np.unique(dindex[dindex>-1])
@@ -224,18 +242,322 @@ def collect_segments(sub, line_data, plot=False, plot_individual=False):
     if plot:
         fig, ax = plt.subplots(1,2,figsize=(8,4))
         for i in range(1,numlines+2):
-            ax[0].scatter(line_data.slope.values[dindex==i],line_data.b.values[dindex==i],s=2,color=plt.colormaps['tab20'](i))
+            ax[0].scatter(180/np.pi*np.arctan(line_data.slope.values[dindex==i]),line_data.b.values[dindex==i],s=2,color=plt.colormaps['tab20'](i))
             for l in range(len(line_data.c1.values[dindex==i])):
                 ax[1].plot([line_data.c1.values[dindex==i][l],
                             line_data.c2.values[dindex==i][l]],
                            [line_data.r1.values[dindex==i][l],
                             line_data.r2.values[dindex==i][l]],
                           color=plt.colormaps['tab20'](i))
-        ax[0].set_title(NUMLINES)
-        ax[0].set_xlabel('slope')
+        ax[0].set_xlabel(r'$\theta$ [deg]')
         ax[0].set_ylabel('y intercept')
+        ax[1].set_title('number of lines: {}'.format(numlines))
         ax[1].set_xlabel('x')
         ax[1].set_ylabel('y')
+        plt.savefig(plotroot+'-collect_segments.png', bbox_inches='tight')
+
+    return dindex, numlines
+
+def collect_segments(sub, line_data, max_R=1e5, plot=False, plotroot='~', plot_individual=False):
+    dfc = line_data.copy()
+
+    # create line index array
+    dindex = np.ones((len(dfc),len(dfc)))*-1
+
+    didx = 1
+
+    for i in range(len(line_data)):  # line of interest
+        dindex[i,i] = i
+
+        # get line i data
+        c1_i = int(dfc.loc[i].c1)
+        c2_i = int(dfc.loc[i].c2)
+        r1_i = int(dfc.loc[i].r1)
+        r2_i = int(dfc.loc[i].r2)
+        s_i = dfc.loc[i].slope
+        theta_i = np.arctan(s_i)
+        b_i = dfc.loc[i].b
+
+        # get line i points
+        rr_i, cc_i = line(r2_i,c2_i,r1_i,c1_i)
+
+        for j in range(i+1,len(line_data)):  # go through rest of lines
+
+            # get line j data
+            c1_j = int(dfc.loc[j].c1)
+            c2_j = int(dfc.loc[j].c2)
+            r1_j = int(dfc.loc[j].r1)
+            r2_j = int(dfc.loc[j].r2)
+            s_j = dfc.loc[j].slope
+            theta_j = np.arctan(s_j)
+            b_j = dfc.loc[j].b
+
+            # get line j points
+            rr_j, cc_j = line(r2_j,c2_j,r1_j,c1_j)
+
+            # get deviation of line j from line i
+            dev_ij = np.abs(s_i * cc_j - rr_j + b_i) / np.sqrt(s_i**2 + 1)
+
+            # if line j deviates from the line of interest by more than X pixels
+            # we assume they're definitely not part of the same line
+            dtheta = np.min(np.array([np.abs(theta_i-theta_j),
+                                      np.abs(theta_i-180-theta_j),np.abs(theta_i-theta_j+180)]))
+            if (dev_ij.max() < 30)&(dtheta*180/np.pi<50):
+
+                # combine points into one line
+                c_all = np.append(cc_i,cc_j)
+                r_all = np.append(rr_i,rr_j)[np.argsort(c_all)]
+                c_all = c_all[np.argsort(c_all)]
+                cmin, cmax = min(c_all), max(c_all)
+                r_cmin, r_cmax = r_all[np.argmin(c_all)], r_all[np.argmax(c_all)]
+                cfit = np.arange(cmin,cmax+1,1)
+
+                # fit a straight line and a parabola to the points
+                m, b = np.polyfit(c_all, r_all, 1)
+                poly_parabola = np.poly1d(np.polyfit(c_all, r_all, 2))
+                rfit_parabola = poly_parabola(cfit)
+                rfit_linear = m * cfit + b
+
+                # calculate deviation 
+                dev = np.abs(m * cfit - rfit_parabola + b) / np.sqrt(m**2 + 1)
+                devmax = max(dev)
+
+                L = np.sqrt((cmax-cmin)**2 + (r_cmax-r_cmin)**2)
+                dev_allowed = min(max(L**2/(8*max_R),2),10)
+
+                if devmax < dev_allowed:
+                    dindex[i,j] = j
+                    dindex[j,i] = j
+                    
+                    cc_i = c_all
+                    rr_i = r_all
+                    c1_i = int(c_all.min())
+                    c2_i = int(c_all.max())
+                    r1_i = int(r_all[np.argmin(c_all)])
+                    r2_i = int(r_all[np.argmax(c_all)])
+                    #s_i = (r2_i-r1_i)/(c2_i-c1_i)
+                    #b_i = r2_i - s_i*c2_i
+                    
+                    s_i, b_i = np.polyfit(c_all, r_all, 1)
+                else:
+                    fjfjf=0
+                    # assume that the rest of the lines also don't fit since the line data is
+                    # sorted by slope
+                    #break
+            else:
+                continue
+
+        didx += 1
+
+    dindex = dindex.astype(int)
+
+    if plot:
+        plt.figure()
+        plt.imshow(dindex)
+        plt.savefig(plotroot+'-line_index_dis.png', bbox_inches='tight')
+
+    groups = []
+    indexlist = np.unique(dindex[dindex>-1])
+
+    while len(indexlist)>0:
+        in1 = dindex[:,indexlist[0]][dindex[:,indexlist[0]]>-1]
+        in2 = np.unique(dindex[:,in1][dindex[:,in1]>-1])
+        new = np.array(list(set(in2).difference(set(in1))))
+        while len(new)>0:
+            in2 = np.unique(dindex[:,new][dindex[:,new]>-1])
+            in1 = np.append(in1, in2)
+            new = np.array(list(set(in2).difference(set(in1))))
+            
+        if len(in1) > 0:
+            groups.append(in1)
+        else:
+            print(f"Warning: empty group at indexlist[0]={indexlist[0]}")
+        indexlist = np.array(list(set(indexlist).difference(set(in1))))
+
+    dindex = np.zeros(len(line_data))
+
+    linenum = 1
+    for i in range(len(groups)):
+        dindex[groups[i]] = linenum
+        linenum +=1
+
+    #print('dindex: ', dindex)
+    
+    numlines = len(np.unique(dindex))
+
+    if plot:
+        fig, ax = plt.subplots(2,1,figsize=(5,8))
+        for i in range(1,numlines+1):
+            ax[0].scatter(180/np.pi*np.arctan(line_data.slope.values[dindex==i]),line_data.b.values[dindex==i],s=2,color=plt.colormaps['tab20'](i))
+            for l in range(len(line_data.c1.values[dindex==i])):
+                ax[1].plot([line_data.c1.values[dindex==i][l],
+                            line_data.c2.values[dindex==i][l]],
+                           [line_data.r1.values[dindex==i][l],
+                            line_data.r2.values[dindex==i][l]],
+                          color=plt.colormaps['tab20'](i))
+        ax[0].set_xlabel(r'$\theta$ [deg]')
+        ax[0].set_ylabel('y intercept')
+        ax[1].set_title('number of lines: {}'.format(numlines))
+        ax[1].set_xlabel('x')
+        ax[1].set_ylabel('y')
+        plt.savefig(plotroot+'-collect_segments.png', bbox_inches='tight')
+
+    return dindex, numlines
+    
+def collect_segments_claude(sub, line_data, max_R=1e5, plot=False, plotroot='~', plot_individual=False):
+    dfc = line_data.copy()
+
+    # Create adjacency matrix
+    adjacency = np.zeros((len(dfc), len(dfc)), dtype=bool)
+    np.fill_diagonal(adjacency, True)
+    
+    # Union-Find to track group membership
+    parent = list(range(len(dfc)))
+    
+    def find(x):
+        if parent[x] != x:
+            parent[x] = find(parent[x])  # path compression
+        return parent[x]
+    
+    def union(x, y):
+        root_x, root_y = find(x), find(y)
+        if root_x != root_y:
+            parent[root_y] = root_x
+
+    for i in range(len(line_data)):  # line of interest
+        # get line i data
+        c1_i = int(dfc.loc[i].c1)
+        c2_i = int(dfc.loc[i].c2)
+        r1_i = int(dfc.loc[i].r1)
+        r2_i = int(dfc.loc[i].r2)
+        s_i = dfc.loc[i].slope
+        b_i = dfc.loc[i].b
+
+        # get line i points
+        rr_i, cc_i = line(r2_i,c2_i,r1_i,c1_i)
+
+        for j in range(i+1,len(line_data)):  # go through rest of lines
+
+            # get line j data
+            c1_j = int(dfc.loc[j].c1)
+            c2_j = int(dfc.loc[j].c2)
+            r1_j = int(dfc.loc[j].r1)
+            r2_j = int(dfc.loc[j].r2)
+            s_j = dfc.loc[j].slope
+            b_j = dfc.loc[j].b
+
+            # get line j points
+            rr_j, cc_j = line(r2_j,c2_j,r1_j,c1_j)
+
+            # get fit j points
+            ccj_fit = np.arange(0,2047,1)
+            rrj_fit = s_j * ccj_fit + b_j
+            ccj_fit = ccj_fit[(rrj_fit>=0)&(rrj_fit<=2047)]
+            rrj_fit = rrj_fit[(rrj_fit>=0)&(rrj_fit<=2047)]
+
+            # get deviation of line j from line i
+            dev_ij = np.abs(s_i * ccj_fit - rrj_fit + b_i) / np.sqrt(s_i**2 + 1)
+
+            if (dev_ij.max() < 20):
+                # combine points into one line
+                c_all = np.append(cc_i,cc_j)
+                r_all = np.append(rr_i,rr_j)[np.argsort(c_all)]
+                c_all = c_all[np.argsort(c_all)]
+                cmin, cmax = min(c_all), max(c_all)
+                r_cmin, r_cmax = r_all[np.argmin(c_all)], r_all[np.argmax(c_all)]
+                cfit = np.arange(cmin,cmax+1,1)
+
+                # fit a straight line and a parabola to the points
+                m, b = np.polyfit(c_all, r_all, 1)
+                poly_parabola = np.poly1d(np.polyfit(c_all, r_all, 2))
+                rfit_parabola = poly_parabola(cfit)
+
+                # calculate deviation 
+                dev = np.abs(m * cfit - rfit_parabola + b) / np.sqrt(m**2 + 1)
+                devmax = max(dev)
+
+                L = np.sqrt((cmax-cmin)**2 + (r_cmax-r_cmin)**2)
+                dev_allowed = min(max(L**2/(8*max_R),2),10)
+
+                if plot_individual:
+                    fig, ax = plt.subplots(1,3, figsize=(12,3))
+                    min_value, max_value = zscale.get_limits(sub)
+                    ax[0].imshow(sub, vmin=min_value, vmax=max_value, cmap='Greys_r')
+                    ax[0].plot([c1_i,c2_i],[r1_i,r2_i])
+                    ax[0].plot([c1_j,c2_j],[r1_j,r2_j])
+                    ax[0].set_ylim(0,2048)
+                    ax[0].set_xlim(0,2048)
+
+                    ax[1].scatter(c_all, r_all,s=1)
+                    ax[1].scatter(cfit, m*cfit+b,s=1)
+
+                    ax[2].scatter(cfit,dev,s=1)
+                    ax[2].axhline(dev_allowed,ls='--',color='xkcd:grey',alpha=0.7)
+                    ax[2].set_title(devmax)
+                    
+                if devmax < dev_allowed:
+                    if plot_individual:
+                        ax[0].set_title('same line: dev_ij = {}'.format((dev_ij.max())))
+                        plt.show()
+                    
+                    # Union the two groups
+                    union(i, j)
+                    
+                    # Mark as connected
+                    adjacency[i,j] = True
+                    adjacency[j,i] = True
+                    
+                    # Update line i to merged version for subsequent comparisons
+                    cc_i = c_all
+                    rr_i = r_all
+                    c1_i = int(c_all.min())
+                    c2_i = int(c_all.max())
+                    r1_i = int(r_all[np.argmin(c_all)])
+                    r2_i = int(r_all[np.argmax(c_all)])
+                    s_i = (r2_i-r1_i)/(c2_i-c1_i) if (c2_i-c1_i) != 0 else 0
+                    b_i = r2_i - s_i*c2_i
+                else:
+                    if plot_individual:
+                        ax[0].set_title('different line: dev_ij = {:.4}'.format((dev_ij.max())))
+                        plt.show()
+
+    if plot:
+        plt.figure()
+        plt.imshow(adjacency.astype(int), cmap='gray')
+        plt.colorbar()
+        plt.savefig(plotroot+'-line_index_dis.png', bbox_inches='tight')
+
+    # Assign group numbers based on union-find structure
+    dindex = np.zeros(len(line_data), dtype=int)
+    root_to_group = {}
+    current_group = 1
+    
+    for i in range(len(line_data)):
+        root = find(i)
+        if root not in root_to_group:
+            root_to_group[root] = current_group
+            current_group += 1
+        dindex[i] = root_to_group[root]
+    
+    numlines = len(root_to_group)
+
+    if plot:
+        fig, ax = plt.subplots(1,2,figsize=(8,4))
+        for i in range(1, numlines+1):
+            mask = dindex == i
+            ax[0].scatter(180/np.pi*np.arctan(line_data.slope.values[mask]),
+                         line_data.b.values[mask], s=2, 
+                         color=plt.colormaps['tab20'](i % 20))
+            for l in np.where(mask)[0]:
+                ax[1].plot([line_data.c1.values[l], line_data.c2.values[l]],
+                           [line_data.r1.values[l], line_data.r2.values[l]],
+                           color=plt.colormaps['tab20'](i % 20))
+        ax[0].set_xlabel(r'$\theta$ [deg]')
+        ax[0].set_ylabel('y intercept')
+        ax[1].set_title('number of lines: {}'.format(numlines))
+        ax[1].set_xlabel('x')
+        ax[1].set_ylabel('y')
+        plt.savefig(plotroot+'-collect_segments.png', bbox_inches='tight')
 
     return dindex, numlines
 
@@ -308,6 +630,7 @@ def perpendicular_line_profile(image, start_point, end_point, perp_range, num_pe
     return perp_distances, np.array(amplitudes)
 
 def total_line_coords(df, linenum, plot=False):
+    plot = False
     RR = []
     CC = []
 
@@ -329,6 +652,7 @@ def total_line_coords(df, linenum, plot=False):
                 c0 = cc[np.argmin(rr)]
                 dx = np.sqrt((rr-r0)**2 + (cc-c0)**2)
                 fig, ax = plt.subplots(1,2)
+                min_value, max_value = zscale.get_limits(sub)
                 ax[0].imshow(sub, origin='lower',vmin=min_value,vmax=max_value,cmap='Greys_r')
                 ax[0].plot(cc,rr,c='r',lw=1)
                 ax[0].set_xlim(0,2048)
@@ -401,6 +725,7 @@ def plot_amplitude(RR, CC, sub):
     return
 
 def fit_coords(RR, CC, length, sub, plot=False):
+    plot=False
     if length > 200:
         coefficients = np.polyfit(CC, RR, 2)
     else:
@@ -425,6 +750,7 @@ def fit_coords(RR, CC, length, sub, plot=False):
 
     if plot:
         plt.figure()
+        min_value, max_value = zscale.get_limits(sub)
         plt.imshow(sub,vmin=min_value,vmax=max_value,origin='lower',cmap='Greys_r')
         plt.scatter(CC,RR,s=0.5)
         plt.plot(cc, rr,c='r',lw=0.3)
@@ -462,6 +788,7 @@ def find_gaps(rr, cc, RR, CC, R0, C0, sub, gap=2, w=50):
 
 def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
                 rollstd, gaps, ngaps, sub, w=50, nsig=3, plot=False):
+    plot=False
     M, sigma = np.median(sub), sub.std()/np.sqrt(len(sub))
 
     lbounds = []
@@ -545,6 +872,7 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
 
     if plot:
         fig, ax = plt.subplots(1,2,figsize=(10,5))
+        min_value, max_value = zscale.get_limits(sub)
         ax[0].imshow(sub, origin='lower',vmin=min_value,vmax=max_value, cmap='Greys_r')
         ax[0].plot(dat.c.values,dat.r.values, lw=0.1,c='r')
         ax[0].set_xlim(0,2048)
@@ -583,6 +911,7 @@ def find_bounds(rr, cc, RR, CC, R0, C0, df, linenum, length, dat, rollmean,
 
 
 def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, nsig=3, nhalf=3, nclose=10, plot=False):
+    plot=False
     mask_fit = np.zeros((2048,2048))
     mask_fit[rr[(dat.dx.values>lbound)&(dat.dx.values<rbound)],
              cc[(dat.dx.values>lbound)&(dat.dx.values<rbound)]] = 1
@@ -624,6 +953,7 @@ def fit_width(dat, lbound, rbound, rr, cc, R0, C0, sub, nsig=3, nhalf=3, nclose=
 
 
 def fit_tophat(sub, CC, RR, dat, length, rollmean, plot=False):
+    plot=False
     guess = [0,length/2,length,np.mean(sub[RR,CC])]
     #print(guess)
     res = minimize(objective, guess, args=(dat.dx.values, dat.h.values), method='Nelder-Mead')
@@ -636,6 +966,7 @@ def fit_tophat(sub, CC, RR, dat, length, rollmean, plot=False):
 
     if plot:
         fig, ax = plt.subplots(1,2)
+        min_value, max_value = zscale.get_limits(sub)
         ax[0].imshow(sub,origin='lower',
                      vmin=min_value,
                      vmax=max_value,
@@ -834,11 +1165,12 @@ def progressive_hough_transform(edges, min_line_length=10, min_threshold=10, ini
         threshold = max(min_threshold, int(threshold * 0.5))
         lgap = max(2,int(lgap*0.5))
 
-     return all_lines
+    return all_lines
 
 def postproc(subfile, detfile, outputfile, plotroot, save, plot, skeleton,
-             progressive, gpu, filter_radius, nclose, nhalf, nsig, gap):
+             progressive, max_R, gpu, filter_radius, nclose, nhalf, nsig, gap):
 
+    # read in fits and detection data
     sub0 = read_fits_file(subfile)
     with open(detfile, 'r') as f:
         data = json.load(f)
@@ -848,25 +1180,42 @@ def postproc(subfile, detfile, outputfile, plotroot, save, plot, skeleton,
         if save:
             dat = pd.DataFrame([0],columns=['numlines'])
             dat.to_hdf(outputfile,key='numlines')
-        return [0], [0], [0], [0]
+        return [0], [0], [0], [0], [0]
 
+    # make sattrail detection mask
     mask = np.zeros((2048,2048))
     mask[pixels[:,1],pixels[:,0]] += 1
+
+    if plot:
+        min_value, max_value = zscale.get_limits(sub0)
+        subm = sub0.copy()
+        subm[mask==1] = -700
+        fig, ax = plt.subplots(1,2,figsize=(10,5))
+        ax[0].imshow(sub0, vmin=min_value, vmax=max_value, origin='lower', cmap='gray')
+        ax[1].imshow(subm, vmin=min_value, vmax=max_value, origin='lower', cmap='gray')
+        plt.savefig(plotroot+'-sattrail_mask.png', bbox_inches='tight')
 
     if skeleton:
         maskphl = skeletonize(mask.astype(np.uint8)).astype('>f4')
     else:
         maskphl = mask
 
+    # run probabilistic hough transform on mask
     if progressive:
         lines = progressive_hough_transform(maskphl, min_line_length=10, min_threshold=10,
                                     initial_threshold=200, initial_gap=50)
     else:
         lines = phl(maskphl, threshold=10, line_length=10, line_gap=50)
 
-    df0, slopes, bs = get_line_data(lines, plot=plot)
+    # make dataframe out of initial hough transform lines
+    df0, slopes, bs = get_line_data(lines=lines, plot=plot, plotroot=plotroot)
 
-    dindex, numlines = collect_segments(sub=sub0, line_data=df0, plot=plot)
+    # initial guess which hough transform lines are part of same line
+    dindex, numlines = collect_segments(sub=sub0, line_data=df0, max_R=max_R, 
+                                        plot=plot, plotroot=plotroot)
+    STOP=True
+    if STOP:
+        return 0,0,0,0,0
     df0['linenum'] = dindex
 
     if gpu:
@@ -906,7 +1255,7 @@ def postproc(subfile, detfile, outputfile, plotroot, save, plot, skeleton,
             mask_fit, mask_new, rr_new, cc_new, halfwidth = fit_width(dat, lbounds[0], rbounds[0], rr, cc, R0,
                                                                       C0, sub, nsig, nhalf, nclose, plot=plot)
         elif newlength < 200:
-            RR, CC, length = total_line_coords(df, linenum=linenum, PLOT=PLOT)
+            RR, CC, length = total_line_coords(df, linenum=linenum, plot=plot)
             rr_end = RR
             cc_end = CC
 

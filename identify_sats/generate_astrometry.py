@@ -27,7 +27,18 @@ def degrees_to_dms(degrees):
     s = (remaining - m) * 60
     return sign*d, m, s
 
-def get_coords(subfile, Cpix, Rpix):
+def get_coords_from_pix(subfile, Cpix, Rpix):
+    hdr = fits.getheader(subfile)
+    shifted = hdr.get('WCSSHIFT', False)
+    if shifted == False:
+        print('incorrect WCS system')
+        return 0, 0
+    else:
+        w = WCS(hdr)
+        RA, DEC = w.all_pix2world(Cpix, Rpix, 1)
+        return RA, DEC
+
+def get_pix_from_coords(subfile, Cpix, Rpix):
     hdr = fits.getheader(subfile)
     shifted = hdr.get('WCSSHIFT', False)
     if shifted == False:
