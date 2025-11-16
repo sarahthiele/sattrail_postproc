@@ -213,7 +213,7 @@ def get_bg_stats(sub, mask):
 
     return N_bg, mean_bg, std_bg, sigma_bg
 
-def check_periodicity(dat_for_bounds, plot=True):
+def check_periodicity(dat_for_bounds, plot=False):
     rollmean = dat_for_bounds.rollmean.values
     peaks = find_peaks(rollmean, prominence=1000, distance=100)[0]
     
@@ -234,7 +234,7 @@ def check_periodicity(dat_for_bounds, plot=True):
         else:
             return CV, False
     else:
-        return np.nan, False     
+        return -1, False     
 
 def fill_gaps(sub, line_id, mask, RR_all, CC_all, RR_sk, CC_sk, ngaps, 
               gaps_loc_cc_fit, dat_for_bounds, N_bg, mean_bg, std_bg, sigma_bg, plot=False):
@@ -520,21 +520,26 @@ def t_test(traillist, sub, mean_bg):
     return is_significant
 
 
-def postproc(subfile, detfile, outputfile, plotroot, save=True, skeleton=True, plot_final=True, 
-             plot_verbose=False, max_R=1e3, filter_radius=10, nsig=5, gap=2, min_line_size=10):
+def postproc(subfile, detfile, outputfile, plotroot, save=True, skeleton=True, plot_final=False, 
+             plot_verbose=False, max_R=1e4, filter_radius=10, nsig=5, gap=2, min_line_size=10):
 
     #t0 = time.time()
     # read in fits and detection data
     try:
         sub0 = read_fits_file(subfile)
     except:
-        print('ihu {} does not have file'.format(ihu))
+        print('subfile {} does not exist'.format(subfile))
         return
     #print(f"FITS file read: {time.time()-t0:.2f}s")
 
     #t1 = time.time()
-    with open(detfile, 'r') as f:
-        data = json.load(f)
+    try:
+        with open(detfile, 'r') as f:
+            data = json.load(f)
+    except:
+        print('detfile {} does not exist'.format(detfile))
+        return
+
     pixels = np.array(data['mask'])
     #print(f"JSON file read: {time.time()-t1:.2f}s")
 
@@ -588,7 +593,13 @@ def postproc(subfile, detfile, outputfile, plotroot, save=True, skeleton=True, p
         num_labels = len(kept_labels)
     else:
         new_labels = kept_labels
-    #print('number of segs: ', num_labels)
+    #print('number of segments: ', num_labels)
+    
+    if num_labels==0:
+        if save:
+            dat = pd.DataFrame([0],columns=['line_id'])
+            dat.to_parquet(outputfile, engine='pyarrow', compression='snappy') 
+        return
 
     ms = []
     bs = []
@@ -637,6 +648,29 @@ def postproc(subfile, detfile, outputfile, plotroot, save=True, skeleton=True, p
     dindex, numlines = collect_segments_ndimage(sub=sub0, line_data=df0, max_R=max_R, 
                                             plot=plot_verbose, plotroot=plotroot,plot_individual=False)    
     df0['line_id'] = dindex
+
+    if numlines==0:  # if lines are vertical e.g., they might get discarded through this process
+        if save:
+            dat = pd.DataFrame([0],columns=['line_id'])
+            dat.to_parquet(outputfile, engine='pyarrow', compression='snappy') 
+        if plot_final:
+            min_value, max_value = zscale.get_limits(sub0)
+            subm = sub0.copy()
+            subm[mask==1] = -700
+            fig, ax = plt.subplots(1,3,figsize=(15,5))
+            ax[0].imshow(sub0, vmin=min_value, vmax=max_value, origin='lower', cmap='gray')
+            ax[1].imshow(subm, vmin=min_value, vmax=max_value, origin='lower', cmap='gray')
+            ax[2].scatter(pixels[:,0],pixels[:,1],s=1,color='xkcd:light grey')
+            ax[0].set_title('image {}'.format(subfile.split('/')[-1].split('-sub')[0]))
+            ax[2].set_title('number of trails: 0')
+            ax[2].set_xlim(0,2048)
+            ax[2].set_ylim(0,2048)
+            ax[2].set_aspect('equal')
+            if save:
+                plt.savefig(plotroot+'-trails.png', bbox_inches='tight',dpi=300)
+            plt.close()
+        return
+
     #print(f"collect_segments: {time.time()-t5:.2f}s")
     #t5_t = time.time()
 
@@ -681,6 +715,7 @@ def postproc(subfile, detfile, outputfile, plotroot, save=True, skeleton=True, p
 
     line_numbers = np.unique(dindex)
     line_numbers_to_process = list(line_numbers)
+    #print('line_numbers_to_process: ', line_numbers_to_process)
     new_line_id = np.max(line_numbers_to_process) + 1
     
     while len(line_numbers_to_process) > 0:
@@ -714,18 +749,18 @@ def postproc(subfile, detfile, outputfile, plotroot, save=True, skeleton=True, p
         
         #print('ngaps: ', ngaps)
         dat_for_bounds = rolling_mean(rr_fit, cc_fit, r1, c1, sub, w=50)
+
+        CV, periodic = check_periodicity(dat_for_bounds)
         
         if ngaps>0:
             if plot_verbose:
                 plt.scatter(dat_for_bounds.c.values[gaps_loc_cc_fit], 
                             dat_for_bounds.r.values[gaps_loc_cc_fit],s=3,c='r')
-
-            CV, periodic = check_periodicity(dat_for_bounds)
             if periodic:
-                print('periodic, CV = {:.3f}'.format(CV))
+                #print('periodic, CV = {:.3f}'.format(CV))
                 is_gap_real = np.zeros(ngaps, dtype=int)
             else:
-                print('not periodic, CV = {:.3f}'.format(CV))
+                #print('not periodic, CV = {:.3f}'.format(CV))
                 is_gap_real = fill_gaps(sub, line_id, mask, RR_all, CC_all, RR_sk, CC_sk, ngaps, 
                       gaps_loc_cc_fit, dat_for_bounds, N_bg, mean_bg, std_bg, sigma_bg, plot=plot_verbose)
             
@@ -807,7 +842,8 @@ def postproc(subfile, detfile, outputfile, plotroot, save=True, skeleton=True, p
                          'c1':c1_new,'c2':c2_new,
                          'r1':r1_new,'r2':r2_new,'coeff_a':A, 'coeff_b':B, 'coeff_c':C,
                          'mask_all_c':mask_pix[1].tolist(), 'mask_all_r':mask_pix[0].tolist(),
-                         'mask_sk_c':mask_pix_sk[1].tolist(), 'mask_sk_r':mask_pix_sk[0].tolist()}  
+                         'mask_sk_c':mask_pix_sk[1].tolist(), 'mask_sk_r':mask_pix_sk[0].tolist(),
+                        'CV':CV}  
         else:
             mask_pix = np.where(labeled_full_line_mask==line_id)
             mask_pix_sk = np.where(labeled_line_mask==line_id)
@@ -815,16 +851,21 @@ def postproc(subfile, detfile, outputfile, plotroot, save=True, skeleton=True, p
             line_data = {'line_id':line_id,'length':np.sqrt((r2-r1)**2+(c2-c1)**2), 'c1':c1,'c2':c2,
                          'r1':r1,'r2':r2,'coeff_a':A, 'coeff_b':B, 'coeff_c':C,
                          'mask_all_c':mask_pix[1].tolist(), 'mask_all_r':mask_pix[0].tolist(),
-                         'mask_sk_c':mask_pix_sk[1].tolist(), 'mask_sk_r':mask_pix_sk[0].tolist()}  
+                         'mask_sk_c':mask_pix_sk[1].tolist(), 'mask_sk_r':mask_pix_sk[0].tolist(),
+                        'CV':CV}  
             
         line_df = pd.DataFrame([line_data])
         traillist = pd.concat([traillist, line_df], ignore_index=True)
         
     is_significant, ratios, SNRs = test_significance(traillist, sub, mean_bg, std_bg)
-    is_significant_ttest = t_test(traillist, sub, mean_bg)
+    #is_significant_ttest = t_test(traillist, sub, mean_bg)
     
     #print(f"looped through lines: {time.time()-t7:.2f}s")
     #t8 = time.time()
+
+    traillist['SNR'] = SNRs
+    traillist['significance'] = is_significant
+    traillist['significance_ratio']  = ratios
 
     traillist = find_edgetrails(sub, traillist, edge_threshold=5)
 
@@ -842,16 +883,22 @@ def postproc(subfile, detfile, outputfile, plotroot, save=True, skeleton=True, p
                           s=5, color='black')
             cm = ax[2].scatter(traillist.loc[traillist.line_id==line_id]['mask_all_c'].values[0],
                           traillist.loc[traillist.line_id==line_id]['mask_all_r'].values[0],s=1,
-                         color=plt.colormaps['tab20'](line_id),
-                              label='{}:{},{:.1f},{:.1f},{}'.format(line_id,is_significant[i],
-                                                            ratios[i],SNRs[i],is_significant_ttest[i]))
+                         color=plt.colormaps['tab20'](line_id%20),
+                              label='{}:{},{:.1f},{:.1f}'.format(line_id,is_significant[i],
+                                                            ratios[i],SNRs[i]))
         plt.legend(markerscale=5,bbox_to_anchor=(1.6, 1), loc='upper right')
         ax[0].set_title('image {}'.format(subfile.split('/')[-1].split('-sub')[0]))
         ax[2].set_title('number of trails: {}'.format(len(traillist)))
-        plt.savefig(plotroot+'-trails.png', bbox_inches='tight',dpi=300)
+        ax[2].set_xlim(0,2048)
+        ax[2].set_ylim(0,2048)
+        ax[2].set_aspect('equal')
+        if save:
+            plt.savefig(plotroot+'-trails.png', bbox_inches='tight',dpi=300)
+        plt.close()
 
     if save:
         traillist.to_parquet(outputfile, engine='pyarrow', compression='snappy') 
     
     #print(f"found edge trails and plotted/saved final data: {time.time()-t8:.2f}s")
+    #print(f"finished image in {time.time()-t0:.2f}s")
     return 
