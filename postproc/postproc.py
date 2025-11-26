@@ -942,7 +942,7 @@ def postproc_fitgaps(subfile, detfile, outputfile, plotroot, save=True, skeleton
     return
     
 def postproc_regiongaps(subfile, detfile, outputfile, plotroot, save=True, skeleton=True, plot_final=False, 
-             plot_verbose=False, max_R=1e4, filter_radius=10, nsig=5, gap=2, min_line_size=10):
+             plot_verbose=False, max_R=1e4, filter_radius=10, nsig=5, gap=5, min_line_size=10):
 
     # read in fits and detection data
     try:

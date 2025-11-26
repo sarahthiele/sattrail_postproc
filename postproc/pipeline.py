@@ -1,4 +1,4 @@
-from postproc_optimized import postproc_regiongaps as pp
+from postproc import postproc_regiongaps as pp
 import numpy as np
 import argparse
 import os
@@ -53,4 +53,4 @@ for i, subfile in enumerate(subfiles[:5]):
 #    print(plotfiles[i])
 #    print(outputfiles[i])
 
-    pp(subfiles[i], detfiles[i], outputfiles[i], plotfiles[i], plot_final=True, max_R=maxr)
+    pp(subfiles[i], detfiles[i], outputfiles[i], plotfiles[i], save=True, plot_final=True, max_R=maxr)

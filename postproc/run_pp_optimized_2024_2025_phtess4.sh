@@ -2,9 +2,7 @@
 
 # subdir in form 1-YYYYMMDD
 
-#subdirs=(1-20250117 1-20250226 1-20250416 1-20250521 1-20250626 1-20250716 1-20250813 1-20250917)
-
-subdirs=(1-20240423 1-20241023 1-20241120 1-20241225 1-20250117 1-20250226)
+subdirs=(1-20240403 1-20240410 1-20240417 1-20240423 1-20241030 1-20241106 1-20241113 1-20241120 1-20241127 1-20241204 1-20241211 1-20241218 1-20241225 1-20250101 1-20250108 1-20250117 1-20250122 1-20250129 1-20250205 1-20250213 1-20250219 1-20250226)
 
 for subdir in "${subdirs[@]}"; do
     echo "starting subdir $subdir"
@@ -13,9 +11,12 @@ for subdir in "${subdirs[@]}"; do
         mkdir "$logdir"
     fi
     for ihu in {1..64}; do
-        # Start the Python script with the parameters in the background
-        logfile=$(printf "/nfs/php2/ar0/P/PROJ/sthiele/PROJDATA/LOGS/$subdir/log_ihu%02d" "$ihu")
-        python /nfs/php2/ar0/P/PROJ/sthiele/repos/sattrail_postproc/postproc/pipeline_pp_optimized.py --subpath /nfs/php2/ar2/P/HP1/REDUCTION/SUB $subdir $ihu > $logfile 2>&1 &
+        datadir=$(printf "/nfs/php2/ar2/P/HP1/REDUCTION/SUB/$subdir/ihu%02d" "$ihu")
+        if [-d "$datadir" ]; then
+            # Start the Python script with the parameters in the background
+            logfile=$(printf "/nfs/php2/ar0/P/PROJ/sthiele/PROJDATA/LOGS/$subdir/log_ihu%02d" "$ihu")
+            python /nfs/php2/ar0/P/PROJ/sthiele/repos/sattrail_postproc/postproc/pipeline.py --subpath /nfs/php2/ar2/P/HP1/REDUCTION/SUB $subdir $ihu > $logfile 2>&1 &
+        fi
     done
     wait
     echo "subdir $subdir is finished"
