@@ -568,7 +568,7 @@ def fit_coords(RR, CC, length, plot=False):
     r1 = rr[np.argmin(cc)]
     r2 = rr[np.argmax(cc)]
 
-    x_fit = np.arange(0,2047.1,0.1)
+    x_fit = np.arange(0,2048,0.1)
     y_fit = np.round(parabola_function(x_fit),0)
     x_fit = x_fit[(y_fit>=0)&(y_fit<2048)]
     y_fit = y_fit[(y_fit>=0)&(y_fit<2048)]
@@ -913,7 +913,7 @@ def fast_masked_median_filter(sub0, masksub_valid, R, C, radius=10):
     return filter_out
 
 def median_filter_cpu(sub0, df0, mask, filter_radius=10, inner_radius=1, outer_radius=15):
-    cfit = np.arange(0,2048,1)
+    cfit = np.arange(0,2048,0.1)
     phl_mask = np.zeros((2048,2048))
     for i in df0.linenum.unique():
         seg = df0.loc[df0.linenum==i]
